@@ -103,6 +103,33 @@ Data tables get a curated narrow column set on small screens. Prefer `st.tabs`
 and vertical stacking over wide multi-column layouts. Test any new page at phone
 width before considering it done.
 
+### Filters
+
+The sidebar filters are global: rendered once in `streamlit_app.py` before any
+tab, and applied to every tab that can honour them. **Club** reaches all three
+tabs including Fixtures; **position and price** reach the player-shaped tabs
+only, because a fixture has neither. A control that silently applies to one tab
+out of three is worse than no control, so any new tab must either consume the
+filter or say why it cannot.
+
+Selection widgets whose options depend on the filter must prune their remembered
+state (`_prune_selection` in `app/scouting_view.py`) — Streamlit hands back a
+stored value even when the current options no longer contain it.
+
+### Charts
+
+- **Never a dual-axis chart.** Two measures of different scale get two charts.
+  Sliding two y-scales against each other can make any story appear, which is
+  disqualifying for something used to spend money.
+- Series colours come from `app/theme.py`, assigned **by fixed slot, never
+  cycled**, so removing a series does not repaint the others. The palette is
+  validated for colour-vision-deficiency separation and contrast in both light
+  and dark; do not add a fifth colour — cap the series and say so.
+- Two of the four light-mode series colours sit below 3:1 contrast, so any view
+  with more than two series must also expose the numbers as a table.
+- Charts are not unit-tested; the frames behind them are. Reshaping logic
+  belongs in a tested helper, not inline in a `render` function.
+
 ## Style
 
 - Python 3.12+, type hints on every public function in `fpl/`.
