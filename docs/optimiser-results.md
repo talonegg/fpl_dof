@@ -48,15 +48,43 @@ information — the same responsiveness that makes it the best ranker in
 This is a flaw in the *decision rule*, not in the solver. The squad optimiser
 returns a provably optimal squad for the numbers it is given.
 
+## Does the better model pick a better squad? No.
+
+The table above makes Component's hold look far better than SeasonMean's (793
+against 740). That is an artefact of one starting gameweek. Holding from four
+different starts, through to gameweek 38:
+
+| Start GW | Component(4) | SeasonMean | Gameweeks |
+|---|---|---|---|
+| 6 | 54.18 | 45.52 | 33 |
+| 12 | 49.52 | 47.07 | 27 |
+| 20 | **40.74** | **50.53** | 19 |
+| 28 | 48.73 | 49.55 | 11 |
+| **Mean** | **48.29** | **48.17** | |
+
+Two wins each and a mean difference of 0.1 points per gameweek. There is **no
+evidence** the component model picks better squads than the season mean.
+
+What does differ is spread: Component ranges over 13.5 points per gameweek
+(40.7–54.2), SeasonMean over 5.0 (45.5–50.5). The more responsive model does
+not produce better squads, it produces more variable ones — which is the same
+property that makes it a poor transfer trigger.
+
+This is the third metric on which Component's clear superiority at *ranking*
+has failed to convert into anything you can act on.
+
 ## What this does and does not show
 
 - **Squad selection works.** The optimiser respects every constraint against
   700 real players and produces plausible squads at a binding £100.0m budget.
 - **The transfer rule does not.** It should not be exposed in the UI until a
   simulation shows it beating a hold.
-- **One season, one start point.** 15 gameweeks is a small sample and a single
-  opening squad carries a lot of luck. Treat the gap between the two models'
-  hold results as suggestive only.
+- **The choice of predictor is not settled.** Across four start points the two
+  models are tied. Use whichever you like for squad selection; prefer the
+  season mean if you dislike variance.
+- **Still one season.** Four start points from the same season are not four
+  independent samples — they share the same players, prices and injuries.
+  Multiple seasons remain the biggest missing piece in the evaluation.
 
 ## What would fix it
 
