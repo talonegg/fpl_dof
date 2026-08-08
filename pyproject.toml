@@ -1,0 +1,23 @@
+[project]
+name = "fpl-dof"
+version = "0.1.0"
+description = "Fantasy Premier League scouting, modelling and squad optimisation"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "backtest: slow historical model-evaluation runs (deselect with '-m \"not backtest\"')",
+]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["venv", "data"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may shadow fixture names as arguments; that is how pytest works.
+"tests/*" = ["B008"]
