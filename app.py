@@ -46,5 +46,22 @@ available_columns = [
 default_columns = ["total_points"]
 selected_columns = st.sidebar.multiselect("Additional columns to display", options=available_columns, default=default_columns)
 
-st.write(f"Showing {len(filtered_df)} players.")
-st.dataframe(filtered_df[mandatory_columns + selected_columns])
+display_columns = mandatory_columns + selected_columns
+
+st.sidebar.header("Sort")
+sort_columns = st.sidebar.multiselect(
+    "Sort by (in order of priority)", options=display_columns, default=["price"]
+)
+
+sort_ascending = []
+for column in sort_columns:
+    ascending = st.sidebar.toggle(f"Ascending: {column}", value=False, key=f"sort_asc_{column}")
+    sort_ascending.append(ascending)
+
+if sort_columns:
+    sorted_df = filtered_df.sort_values(by=sort_columns, ascending=sort_ascending)
+else:
+    sorted_df = filtered_df
+
+st.write(f"Showing {len(sorted_df)} players.")
+st.dataframe(sorted_df[display_columns])
