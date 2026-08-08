@@ -41,16 +41,22 @@ def normalise_name(name: str) -> str:
     """
     if not isinstance(name, str):
         return ""
-    decomposed = unicodedata.normalize("NFKD", name)
+    decomposed = unicodedata.normalize("NFKD", str(name))
     without_accents = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
     cleaned = _PUNCTUATION.sub(" ", without_accents)
     return _WHITESPACE.sub(" ", cleaned).strip().lower()
 
 
 def add_match_key(df: pd.DataFrame, name_column: str) -> pd.DataFrame:
-    """Return a copy with a ``match_key`` column derived from ``name_column``."""
+    """Return a copy with a ``match_key`` column derived from ``name_column``.
+
+    An unusable name becomes NaN rather than the empty string. Empty strings
+    are equal to each other, so a nameless archive row would otherwise join to
+    a nameless current player and be counted as a successful match.
+    """
     df = df.copy()
-    df["match_key"] = df[name_column].map(normalise_name)
+    keys = df[name_column].map(normalise_name)
+    df["match_key"] = keys.where(keys.astype(bool))
     return df
 
 
@@ -78,13 +84,30 @@ def match_to_current_players(
     """
     keyed_archive = add_match_key(archive, name_column)
     keys = player_match_keys(players).rename(columns={"element": "current_element"})
+    keys = keys[keys["match_key"].notna()]
 
-    # Collisions would fan a single archive row out into several. Keep the
-    # first and let unmatched_names() surface the ambiguity instead.
-    keys = keys.drop_duplicates(subset="match_key", keep="first")
+    # Two current players sharing a normalised name cannot be told apart, and
+    # picking one silently attributes a whole season of history to the wrong
+    # player. Drop both and let ambiguous_names() report them -- a gap is
+    # recoverable, a wrong join is not.
+    collisions = set(keys["match_key"][keys["match_key"].duplicated(keep=False)])
+    keys = keys[~keys["match_key"].isin(collisions)]
 
     merged = keyed_archive.merge(keys[["match_key", "current_element"]], on="match_key", how="left")
     return merged
+
+
+def ambiguous_names(players: pd.DataFrame) -> list[str]:
+    """Current players whose normalised names collide with another player's.
+
+    These can never be matched safely, and they do *not* show up in
+    :func:`unmatched_names` -- that only inspects archive rows that found
+    nothing. Check both before trusting a cross-season join.
+    """
+    keys = player_match_keys(players)
+    keys = keys[keys["match_key"].notna()]
+    duplicated = keys["match_key"].duplicated(keep=False)
+    return sorted(keys.loc[duplicated, "full_name"].str.strip().unique().tolist())
 
 
 def unmatched_names(matched: pd.DataFrame, name_column: str = "player_name") -> list[str]:

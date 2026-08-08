@@ -80,8 +80,11 @@ with st.sidebar:
         format_func=lambda value: labels[value],
         key="watchlist_select",
     )
+    # Compare as sets: the widget hands codes back in element order while the
+    # stored list is sorted, so a list comparison differs on the first render
+    # of every session and rewrites the file the user never touched.
     codes = players[players["element"].isin(chosen)]["code"].tolist()
-    if codes != st.session_state.watchlist:
+    if set(codes) != set(st.session_state.watchlist):
         st.session_state.watchlist = codes
         watchlist.save(WATCHLIST_PATH, codes)
 

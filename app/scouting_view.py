@@ -198,6 +198,17 @@ def render_comparison(players: pd.DataFrame, history: pd.DataFrame, season_label
     wide = combined.pivot(index="gameweek", columns="player", values="cumulative")
     wide = wide.ffill()
 
+    # Hold column order to the order players were selected. `pivot` sorts
+    # alphabetically, and colours are assigned by position, so removing one
+    # player would otherwise recolour the others -- the exact repaint the
+    # fixed-slot palette exists to prevent.
+    ordered = [
+        labels[element].split(" (")[0]
+        for element in selected
+        if labels[element].split(" (")[0] in wide.columns
+    ]
+    wide = wide[ordered]
+
     st.markdown(f"**Cumulative points — {season_label}**")
     st.line_chart(wide, color=series_colours(len(wide.columns)), height=320)
 
