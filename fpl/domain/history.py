@@ -65,6 +65,46 @@ def build_gameweek_history(summary: dict[str, Any]) -> pd.DataFrame:
     return df.sort_values("gameweek").reset_index(drop=True)
 
 
+SUMMED_COLUMNS = (
+    "total_points",
+    "minutes",
+    "goals_scored",
+    "assists",
+    "bonus",
+    "bps",
+    "clean_sheets",
+    "goals_conceded",
+    "saves",
+    "expected_goals",
+    "expected_assists",
+    "expected_goal_involvements",
+)
+
+SNAPSHOT_COLUMNS = ("price", "value", "selected", "team_name", "position", "player_name")
+
+
+def collapse_to_gameweeks(df: pd.DataFrame, group_columns: list[str]) -> pd.DataFrame:
+    """Collapse to one row per group, summing counting stats.
+
+    In a double gameweek a player has two rows for the same gameweek. Left
+    alone that breaks any pivot and silently double-plots any chart, and in a
+    backtest it makes a player look like they appear twice.
+
+    Counting stats sum, because two matches really did produce both lots of
+    points. Snapshot values like price take the last, because they describe a
+    state rather than an accumulation.
+    """
+    if df.empty:
+        return df
+
+    aggregations = {column: "sum" for column in SUMMED_COLUMNS if column in df.columns}
+    aggregations.update({column: "last" for column in SNAPSHOT_COLUMNS if column in df.columns})
+    if not aggregations:
+        return df
+
+    return df.sort_values(group_columns).groupby(group_columns, as_index=False).agg(aggregations)
+
+
 def build_past_seasons(summary: dict[str, Any]) -> pd.DataFrame:
     """One row per previous season for a player, as a coarse prior.
 

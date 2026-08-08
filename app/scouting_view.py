@@ -18,6 +18,7 @@ import pandas as pd
 import streamlit as st
 
 from app.theme import MAX_COMPARISON_SERIES, series_colours
+from fpl.domain.history import collapse_to_gameweeks
 from fpl.features.rates import LOW_MINUTES_THRESHOLD
 
 POINTS_LABEL = "Points"
@@ -43,20 +44,7 @@ def _history_for(history: pd.DataFrame, element: int) -> pd.DataFrame:
     if player.empty:
         return player
 
-    aggregations = {
-        column: "sum"
-        for column in ("total_points", "minutes", "goals_scored", "assists")
-        if column in player.columns
-    }
-    if "price" in player.columns:
-        aggregations["price"] = "last"
-
-    return (
-        player.sort_values("gameweek")
-        .groupby("gameweek", as_index=False)
-        .agg(aggregations)
-        .sort_values("gameweek")
-    )
+    return collapse_to_gameweeks(player, ["gameweek"]).sort_values("gameweek")
 
 
 def _summary_metrics(player: pd.Series) -> None:
