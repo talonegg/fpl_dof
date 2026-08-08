@@ -19,10 +19,27 @@ import streamlit as st
 
 from app.theme import MAX_COMPARISON_SERIES, series_colours
 from fpl.domain.history import collapse_to_gameweeks
+from fpl.features.filters import restrict_to_available
 from fpl.features.rates import LOW_MINUTES_THRESHOLD
 
 POINTS_LABEL = "Points"
 MINUTES_LABEL = "Minutes"
+
+
+def _prune_selection(key: str, valid: set) -> None:
+    """Drop remembered selections that the current filter has removed.
+
+    Streamlit keeps widget state under its key, so a player selected before a
+    filter change would otherwise be handed back to a widget that no longer
+    offers them.
+    """
+    if key not in st.session_state:
+        return
+    current = st.session_state[key]
+    if isinstance(current, list):
+        st.session_state[key] = restrict_to_available(current, valid)
+    elif current not in valid:
+        del st.session_state[key]
 
 
 def _player_label(row) -> str:
@@ -113,10 +130,11 @@ def render_detail(players: pd.DataFrame, history: pd.DataFrame, season_label: st
     st.subheader("Player detail")
 
     if players.empty:
-        st.warning("No players to show.")
+        st.warning("No players match those filters.")
         return
 
     labels = {row.element: _player_label(row) for row in players.itertuples()}
+    _prune_selection("detail_player", set(labels))
     element = st.selectbox(
         "Player",
         options=list(labels),
@@ -134,10 +152,11 @@ def render_comparison(players: pd.DataFrame, history: pd.DataFrame, season_label
     st.subheader("Compare players")
 
     if players.empty:
-        st.warning("No players to show.")
+        st.warning("No players match those filters.")
         return
 
     labels = {row.element: _player_label(row) for row in players.itertuples()}
+    _prune_selection("comparison_players", set(labels))
     selected = st.multiselect(
         "Players",
         options=list(labels),

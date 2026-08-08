@@ -42,35 +42,6 @@ COLUMN_LABELS = {
 }
 
 
-def _filter_controls(df: pd.DataFrame) -> pd.DataFrame:
-    """Render the sidebar filters and return the filtered frame."""
-    st.sidebar.header("Filters")
-
-    positions = sorted(df["position"].unique())
-    selected_positions = st.sidebar.multiselect("Position", options=positions, default=positions)
-
-    teams = sorted(df["team_name"].unique())
-    selected_teams = st.sidebar.multiselect("Team", options=teams, default=teams)
-
-    subset = df[df["position"].isin(selected_positions) & df["team_name"].isin(selected_teams)]
-    if subset.empty:
-        return subset
-
-    min_price = float(subset["price"].min())
-    max_price = float(subset["price"].max())
-    if min_price == max_price:
-        return subset
-
-    low, high = st.sidebar.slider(
-        "Price range (£m)",
-        min_value=min_price,
-        max_value=max_price,
-        value=(min_price, max_price),
-        step=0.1,
-    )
-    return subset[subset["price"].between(low, high)]
-
-
 def _column_controls() -> list[str]:
     """Render the column picker and return the columns to display."""
     st.sidebar.header("Columns")
@@ -96,19 +67,23 @@ def _sort_controls(df: pd.DataFrame, display_columns: list[str]) -> pd.DataFrame
     return df.sort_values(by=sort_columns, ascending=ascending)
 
 
-def render(players: pd.DataFrame) -> None:
-    """Render the whole player explorer page."""
+def render(players: pd.DataFrame, total: int | None = None) -> None:
+    """Render the player explorer.
+
+    ``players`` arrives already filtered by the shared sidebar controls;
+    ``total`` is the unfiltered count, so the caption can say what was left out.
+    """
     st.title("FPL Data Explorer")
 
-    filtered = _filter_controls(players)
-    if filtered.empty:
+    if players.empty:
         st.warning("No players match those filters.")
         return
 
     display_columns = _column_controls()
-    sorted_players = _sort_controls(filtered, display_columns)
+    sorted_players = _sort_controls(players, display_columns)
 
-    st.caption(f"Showing {len(sorted_players)} of {len(players)} players.")
+    total = len(players) if total is None else total
+    st.caption(f"Showing {len(sorted_players)} of {total} players.")
     st.dataframe(
         sorted_players[display_columns].rename(columns=COLUMN_LABELS),
         width="stretch",

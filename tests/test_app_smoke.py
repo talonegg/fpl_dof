@@ -132,3 +132,91 @@ def test_watchlist_starts_empty_and_persists_a_selection(
 
     watchlist_widget = at.session_state["watchlist_select"]
     assert watchlist_widget == []
+
+
+# --- The sidebar filters must reach every tab, not just the one they sit next to ---
+
+
+def _positions_offered_in_scouting(at):
+    """Positions visible in the scouting player selector.
+
+    AppTest reports options already formatted, so these are label strings of
+    the form "Raya (Arsenal, Goalkeeper, £6.0m)".
+    """
+    return {label.split(", ")[1] for label in at.selectbox(key="detail_player").options}
+
+
+def test_the_position_filter_reaches_the_scouting_tab(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    at.sidebar.multiselect(key="filter_positions").set_value(["Goalkeeper"]).run()
+
+    assert not at.exception
+    assert _positions_offered_in_scouting(at) == {"Goalkeeper"}
+
+
+def test_the_position_filter_reaches_the_comparison_selector(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    at.sidebar.multiselect(key="filter_positions").set_value(["Goalkeeper"]).run()
+
+    expected = sum(e["element_type"] == 1 for e in bootstrap["elements"])
+    assert len(at.multiselect(key="comparison_players").options) == expected
+
+
+def test_the_club_filter_reaches_the_fixtures_tab(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    """The club filter is the only one that means anything for fixtures."""
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    at.sidebar.multiselect(key="filter_teams").set_value(["Arsenal"]).run()
+
+    assert not at.exception
+    captions = " ".join(caption.value for caption in at.caption)
+    # Only one club left, so it is trivially the kindest run.
+    assert "Kindest run: Arsenal." in captions
+
+
+def test_the_club_filter_reaches_the_players_tab(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    at.sidebar.multiselect(key="filter_teams").set_value(["Arsenal"]).run()
+
+    expected = sum(e["team"] == 1 for e in bootstrap["elements"])
+    captions = [caption.value for caption in at.caption]
+    assert any(caption.startswith(f"Showing {expected} of") for caption in captions)
+
+
+def test_deselecting_every_club_warns_on_the_fixtures_tab(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    at.sidebar.multiselect(key="filter_teams").set_value([]).run()
+
+    assert not at.exception
+    warnings = [warning.value for warning in at.warning]
+    assert any("No fixtures for the selected clubs" in warning for warning in warnings)
+
+
+def test_a_selection_removed_by_a_filter_does_not_break_the_app(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    """Pick a player, then filter them out. Streamlit would otherwise raise."""
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    forwards = [element["id"] for element in bootstrap["elements"] if element["element_type"] == 4]
+    at.multiselect(key="comparison_players").set_value(forwards[:2]).run()
+    assert not at.exception
+
+    at.sidebar.multiselect(key="filter_positions").set_value(["Goalkeeper"]).run()
+
+    assert not at.exception
+    assert at.multiselect(key="comparison_players").value == []

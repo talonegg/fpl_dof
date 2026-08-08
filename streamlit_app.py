@@ -10,7 +10,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from app import fixtures_view, players_view, scouting_view
+from app import filters_view, fixtures_view, players_view, scouting_view
 from app.data import (
     ARCHIVE_SEASON,
     load_archive_history,
@@ -19,6 +19,7 @@ from app.data import (
     load_scouting_players,
 )
 from fpl.features import watchlist
+from fpl.features.filters import apply_filter
 
 # Overridable so tests can redirect it, and because a hosted deployment has an
 # ephemeral filesystem and may want to point this elsewhere.
@@ -38,24 +39,34 @@ players = load_scouting_players()
 if "watchlist" not in st.session_state:
     st.session_state.watchlist = watchlist.load(WATCHLIST_PATH)
 
+# Filters are rendered before the tabs so one set of controls drives them all.
+player_filter = filters_view.render(players)
+filtered_players = apply_filter(players, player_filter)
+
 # Tabs rather than columns: they stack cleanly on a phone.
 players_tab, scouting_tab, fixtures_tab = st.tabs(["Players", "Scouting", "Fixtures"])
 
 with players_tab:
-    players_view.render(players)
+    players_view.render(filtered_players, total=len(players))
 
 with scouting_tab:
+    st.caption(filters_view.caption(player_filter, len(filtered_players), len(players)))
     history = load_archive_history()
-    scouting_view.render_detail(players, history, season_label=ARCHIVE_SEASON)
+    scouting_view.render_detail(filtered_players, history, season_label=ARCHIVE_SEASON)
     st.divider()
-    scouting_view.render_comparison(players, history, season_label=ARCHIVE_SEASON)
+    scouting_view.render_comparison(filtered_players, history, season_label=ARCHIVE_SEASON)
 
 with fixtures_tab:
     gameweek = load_next_gameweek()
     if gameweek is None:
         st.info("The season is over — no upcoming fixtures.")
     else:
-        fixtures_view.render(load_schedule(), from_gameweek=gameweek)
+        # Only the club filter reaches here; a fixture has no position or price.
+        schedule = filters_view.filter_schedule(load_schedule(), player_filter)
+        if schedule.empty:
+            st.warning("No fixtures for the selected clubs.")
+        else:
+            fixtures_view.render(schedule, from_gameweek=gameweek)
 
 with st.sidebar:
     st.header("Watchlist")
