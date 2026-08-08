@@ -57,6 +57,11 @@ def build_players_frame(bootstrap: dict[str, Any]) -> pd.DataFrame:
     Adds readable team/position/price columns and normalises numeric types.
     This is the boundary where raw API shapes stop and domain types begin --
     nothing downstream should touch ``bootstrap["elements"]`` directly.
+
+    Also aliases ``id`` to ``element``. Bootstrap calls the player id ``id``,
+    while every other endpoint and the archive call the same number
+    ``element``; carrying both names means joins do not need to remember which
+    source a frame came from.
     """
     df = pd.DataFrame(bootstrap["elements"])
     df = add_readable_columns(
@@ -64,4 +69,7 @@ def build_players_frame(bootstrap: dict[str, Any]) -> pd.DataFrame:
         teams=bootstrap["teams"],
         element_types=bootstrap["element_types"],
     )
-    return coerce_numeric_columns(df)
+    df = coerce_numeric_columns(df)
+    if "element" not in df.columns and "id" in df.columns:
+        df["element"] = df["id"]
+    return df

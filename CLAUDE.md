@@ -103,6 +103,20 @@ Data tables get a curated narrow column set on small screens. Prefer `st.tabs`
 and vertical stacking over wide multi-column layouts. Test any new page at phone
 width before considering it done.
 
+### Charts
+
+- **Never a dual-axis chart.** Two measures of different scale get two charts.
+  Sliding two y-scales against each other can make any story appear, which is
+  disqualifying for something used to spend money.
+- Series colours come from `app/theme.py`, assigned **by fixed slot, never
+  cycled**, so removing a series does not repaint the others. The palette is
+  validated for colour-vision-deficiency separation and contrast in both light
+  and dark; do not add a fifth colour — cap the series and say so.
+- Two of the four light-mode series colours sit below 3:1 contrast, so any view
+  with more than two series must also expose the numbers as a table.
+- Charts are not unit-tested; the frames behind them are. Reshaping logic
+  belongs in a tested helper, not inline in a `render` function.
+
 ## Style
 
 - Python 3.12+, type hints on every public function in `fpl/`.
