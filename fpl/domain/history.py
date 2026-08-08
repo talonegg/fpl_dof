@@ -80,7 +80,20 @@ SUMMED_COLUMNS = (
     "expected_goal_involvements",
 )
 
-SNAPSHOT_COLUMNS = ("price", "value", "selected", "team_name", "position", "player_name")
+SNAPSHOT_COLUMNS = (
+    "price",
+    "value",
+    "selected",
+    "team_name",
+    "position",
+    "player_name",
+    # Known in advance, so models are allowed these. Note the limitation: in a
+    # double gameweek a player has two different opponents and this keeps only
+    # the last. Modelling doubles properly needs a row per fixture, not per
+    # gameweek -- a change worth making when doubles actually matter.
+    "opponent_team",
+    "was_home",
+)
 
 
 def collapse_to_gameweeks(df: pd.DataFrame, group_columns: list[str]) -> pd.DataFrame:

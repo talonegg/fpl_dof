@@ -15,9 +15,22 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fpl.backtest.baselines import BENCHMARK, baseline_predictors  # noqa: E402
+from fpl.backtest.baselines import BENCHMARK, all_predictors  # noqa: E402
 from fpl.backtest.harness import DEFAULT_FIRST_GAMEWEEK, compare  # noqa: E402
+from fpl.backtest.significance import (  # noqa: E402
+    SIGNIFICANCE_THRESHOLD,
+    comparison_table,
+)
 from fpl.sources.archive import fetch_season_gameweeks  # noqa: E402
+
+
+def _format_cell(value) -> str:
+    """Format one cell; the tables mix numbers with text like "19/33"."""
+    if isinstance(value, str):
+        return value
+    if value != value:  # NaN
+        return "—"
+    return f"{value:g}"
 
 
 def to_markdown_table(table) -> str:
@@ -32,7 +45,7 @@ def to_markdown_table(table) -> str:
         "|" + "|".join("---" for _ in headers) + "|",
     ]
     for name, row in table.iterrows():
-        cells = [str(name)] + ["—" if value != value else f"{value:g}" for value in row]
+        cells = [str(name)] + [_format_cell(value) for value in row]
         lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
@@ -56,8 +69,13 @@ def main() -> int:
     args = parser.parse_args()
 
     season = fetch_season_gameweeks(args.season)
-    table = compare(season, baseline_predictors(), first_gameweek=args.first_gameweek)
+    predictors = all_predictors()
+    table = compare(season, predictors, first_gameweek=args.first_gameweek)
     table = table[[column for column in COLUMNS if column in table.columns]]
+
+    against_benchmark = comparison_table(
+        season, predictors, BENCHMARK, first_gameweek=args.first_gameweek
+    )
 
     lines = [
         "# Model results",
@@ -86,6 +104,16 @@ def main() -> int:
         "",
         to_markdown_table(table.round(3)),
         "",
+        f"## Against the benchmark ({BENCHMARK.name})",
+        "",
+        "Ranking a table by a metric will always produce a winner. This asks the "
+        "harder question: is the gap bigger than gameweek noise? Both models are "
+        "scored on the same gameweeks and the difference is taken per gameweek, "
+        f"so `t_statistic` is a paired statistic. Below |{SIGNIFICANCE_THRESHOLD}| "
+        "is noise.",
+        "",
+        to_markdown_table(against_benchmark.round(3)),
+        "",
         "## Reading these results",
         "",
         "- **Better ranking does not mean better picks.** The shortest form "
@@ -100,7 +128,11 @@ def main() -> int:
         "dataset, most of whom did not play. It is the right comparison for "
         '"is this model doing anything", not a realistic alternative strategy.',
         "- **One season is not proof.** These numbers come from a single season of "
-        "33 scored gameweeks. Treat a small gap between models as noise.",
+        "33 scored gameweeks. Treat a small gap between models as noise — the "
+        "table above says which gaps qualify.",
+        "- **Nothing here has earned its way into the UI yet.** Per `CLAUDE.md`, a "
+        "model needs to beat the benchmark to be wired in, and beating it means "
+        "clearing the noise threshold, not merely topping the table.",
         "",
     ]
 

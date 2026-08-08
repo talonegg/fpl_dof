@@ -8,11 +8,12 @@ held-out gameweeks, before it gets wired into the UI.
 from __future__ import annotations
 
 from fpl.models.base import Predictor
+from fpl.models.minutes import MinutesAdjustedPredictor, OpponentAdjustedPredictor
 from fpl.models.naive import NaiveFormPredictor, SeasonMeanPredictor, ZeroPredictor
 
 
 def baseline_predictors() -> list[Predictor]:
-    """The standard comparison set, cheapest first."""
+    """The floor models: no fixtures, no minutes, just past points."""
     return [
         ZeroPredictor(),
         SeasonMeanPredictor(),
@@ -20,6 +21,21 @@ def baseline_predictors() -> list[Predictor]:
         NaiveFormPredictor(window=5),
         NaiveFormPredictor(window=10),
     ]
+
+
+def candidate_predictors() -> list[Predictor]:
+    """Models that are trying to be better than the floor."""
+    return [
+        MinutesAdjustedPredictor(minutes_window=3),
+        MinutesAdjustedPredictor(minutes_window=4),
+        MinutesAdjustedPredictor(minutes_window=6),
+        OpponentAdjustedPredictor(minutes_window=4),
+    ]
+
+
+def all_predictors() -> list[Predictor]:
+    """Everything, for the results table."""
+    return [*baseline_predictors(), *candidate_predictors()]
 
 
 # The bar. A model that does not beat this is not ready for the UI.

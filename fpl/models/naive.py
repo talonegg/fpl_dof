@@ -35,7 +35,12 @@ class NaiveFormPredictor:
     def name(self) -> str:
         return f"NaiveForm({self.window})"
 
-    def predict(self, history: pd.DataFrame, gameweek: int) -> pd.DataFrame:
+    def predict(
+        self,
+        history: pd.DataFrame,
+        gameweek: int,
+        fixtures: pd.DataFrame | None = None,
+    ) -> pd.DataFrame:
         if history.empty:
             return empty_predictions()
 
@@ -54,7 +59,12 @@ class SeasonMeanPredictor:
     def name(self) -> str:
         return "SeasonMean"
 
-    def predict(self, history: pd.DataFrame, gameweek: int) -> pd.DataFrame:
+    def predict(
+        self,
+        history: pd.DataFrame,
+        gameweek: int,
+        fixtures: pd.DataFrame | None = None,
+    ) -> pd.DataFrame:
         if history.empty:
             return empty_predictions()
 
@@ -75,7 +85,12 @@ class ZeroPredictor:
     def name(self) -> str:
         return "Zero"
 
-    def predict(self, history: pd.DataFrame, gameweek: int) -> pd.DataFrame:
+    def predict(
+        self,
+        history: pd.DataFrame,
+        gameweek: int,
+        fixtures: pd.DataFrame | None = None,
+    ) -> pd.DataFrame:
         if history.empty:
             return empty_predictions()
 

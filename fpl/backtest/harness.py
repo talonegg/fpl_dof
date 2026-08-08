@@ -20,7 +20,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from fpl.domain.history import collapse_to_gameweeks
-from fpl.models.base import Predictor
+from fpl.models.base import FIXTURE_COLUMNS, Predictor
 
 # Predicting gameweek 1 from nothing is not a test of anything, and early
 # gameweeks are mostly noise, so a backtest starts once there is some history.
@@ -59,6 +59,23 @@ def prepare_season(season: pd.DataFrame) -> pd.DataFrame:
     return collapsed.sort_values(["gameweek", "element"]).reset_index(drop=True)
 
 
+def known_fixtures(season: pd.DataFrame, gameweek: int) -> pd.DataFrame:
+    """What a model is allowed to know about the gameweek it is predicting.
+
+    The schedule is published months ahead, so who a player faces and whether
+    they are at home are legitimately knowable at the deadline. Everything else
+    in those rows -- points, minutes, goals -- is the answer, so this returns
+    only :data:`fpl.models.base.FIXTURE_COLUMNS`.
+
+    Filtering by allow-list rather than dropping known-bad columns matters: a
+    new column appearing in the archive would otherwise silently become
+    available to every model.
+    """
+    rows = season[season["gameweek"] == gameweek]
+    available = [column for column in FIXTURE_COLUMNS if column in rows.columns]
+    return rows[available].copy()
+
+
 def replay(
     season: pd.DataFrame,
     predictor: Predictor,
@@ -87,7 +104,7 @@ def replay(
         if history.empty:
             continue
 
-        predictions = predictor.predict(history, gameweek)
+        predictions = predictor.predict(history, gameweek, known_fixtures(season, gameweek))
         if predictions.empty:
             continue
 
