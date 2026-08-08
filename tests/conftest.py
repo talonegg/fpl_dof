@@ -27,12 +27,32 @@ def bootstrap() -> dict[str, Any]:
 
 
 @pytest.fixture
-def fake_fetcher(bootstrap):
-    """A :data:`fpl.sources.fpl_api.Fetcher` that serves the frozen snapshot."""
+def fixtures_snapshot() -> dict[str, Any]:
+    """Real fixtures for gameweeks 1-6, plus all 20 teams."""
+    return load_fixture("fixtures_sample.json")
+
+
+@pytest.fixture
+def schedule(fixtures_snapshot):
+    """The team-perspective schedule built from the real fixtures snapshot."""
+    from fpl.domain.fixtures import build_team_schedule
+
+    return build_team_schedule(fixtures_snapshot["fixtures"], fixtures_snapshot["teams"])
+
+
+@pytest.fixture
+def fake_fetcher(bootstrap, fixtures_snapshot):
+    """A :data:`fpl.sources.fpl_api.Fetcher` that serves the frozen snapshots.
+
+    Anything it does not recognise raises, so a test that reaches for the real
+    network fails loudly instead of silently going online.
+    """
 
     def fetch(url: str) -> Any:
         if url.endswith("/bootstrap-static/"):
             return bootstrap
+        if url.endswith("/fixtures/"):
+            return fixtures_snapshot["fixtures"]
         raise AssertionError(f"unexpected URL requested in a test: {url}")
 
     return fetch

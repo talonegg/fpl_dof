@@ -7,8 +7,8 @@ locally and on Streamlit Community Cloud without an editable install.
 
 import streamlit as st
 
-from app.data import load_players
-from app.players_view import render
+from app import fixtures_view, players_view
+from app.data import load_next_gameweek, load_players, load_schedule
 
 st.set_page_config(
     page_title="FPL DOF",
@@ -18,4 +18,15 @@ st.set_page_config(
     initial_sidebar_state="auto",
 )
 
-render(load_players())
+# Tabs rather than columns: they stack cleanly on a phone.
+players_tab, fixtures_tab = st.tabs(["Players", "Fixtures"])
+
+with players_tab:
+    players_view.render(load_players())
+
+with fixtures_tab:
+    gameweek = load_next_gameweek()
+    if gameweek is None:
+        st.info("The season is over — no upcoming fixtures.")
+    else:
+        fixtures_view.render(load_schedule(), from_gameweek=gameweek)
