@@ -17,11 +17,15 @@ almost never pays; the same transfer over six gameweeks often does, because the
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import pandas as pd
 
-from fpl.domain.rules import FREE_TRANSFERS_PER_GAMEWEEK, TRANSFER_HIT_POINTS
+from fpl.domain.rules import (
+    FREE_TRANSFERS_PER_GAMEWEEK,
+    MAX_ROLLED_FREE_TRANSFERS,
+    TRANSFER_HIT_POINTS,
+)
 from fpl.optimise.squad import (
     InfeasibleSquad,
     SquadConstraints,
@@ -31,8 +35,10 @@ from fpl.optimise.squad import (
 DEFAULT_HORIZON = 5
 
 # Trying every possible number of transfers is pointless: beyond a handful the
-# hits swamp any plausible gain.
-MAX_TRANSFERS_CONSIDERED = 4
+# hits swamp any plausible gain. The floor is the maximum number of free
+# transfers that can be banked -- a manager holding five owes nothing for the
+# fifth, so refusing to consider it would rule out a move that is free.
+MAX_TRANSFERS_CONSIDERED = max(4, MAX_ROLLED_FREE_TRANSFERS)
 
 
 @dataclass
@@ -83,15 +89,19 @@ def _squad_expected_points(
 
     held = optimise_squad(
         owned,
-        SquadConstraints(
+        # `replace` rather than a new SquadConstraints: constructing one fresh
+        # silently reverts squad_size and starting_size to their defaults, so a
+        # caller's custom sizes were being ignored here.
+        replace(
+            constraints,
             # The squad is fixed, so budget and club limits are already
             # satisfied by construction. Relax them -- an existing squad must
             # never be rejected by its own selling prices -- but keep the
             # budget finite, since a solver cannot take an infinite bound.
             budget=float(owned["price"].sum()),
             max_per_club=constraints.squad_size,
-            composition=constraints.composition,
-            bench_weight=constraints.bench_weight,
+            must_include=(),
+            must_exclude=(),
         ),
     )
     return held.expected_points
@@ -118,6 +128,15 @@ def plan_transfers(
     """
     constraints = constraints or SquadConstraints()
     current_squad = list(current_squad)
+
+    # Validate here rather than letting the search loop swallow it. Every
+    # candidate would raise InfeasibleSquad, the loop would `continue` past
+    # each one, and an impossible request would come back as a cheerful
+    # "roll the transfer".
+    available = set(players["element"])
+    for required in constraints.must_include:
+        if required not in available:
+            raise InfeasibleSquad(f"required player {required} is not in the pool")
 
     baseline = _squad_expected_points(current_squad, players, constraints)
     budget = float(players[players["element"].isin(current_squad)]["price"].sum() + bank)
@@ -182,9 +201,19 @@ def _best_squad_keeping(
 
     from fpl.optimise.squad import _solver
 
-    pool = players.drop_duplicates(subset="element").reset_index(drop=True)
+    # must_exclude has to be honoured here too. optimise_squad applies both
+    # lists; if this path ignored them the same SquadConstraints would mean
+    # different things depending on which entry point you called.
+    pool = players[~players["element"].isin(constraints.must_exclude)]
+    pool = pool.drop_duplicates(subset="element").reset_index(drop=True)
+    if pool.empty:
+        raise InfeasibleSquad("no players to choose from")
     elements = pool["element"].tolist()
     owned = set(current_squad)
+
+    for required in constraints.must_include:
+        if required not in elements:
+            raise InfeasibleSquad(f"required player {required} is not in the pool")
 
     problem = pulp.LpProblem("fpl_transfers", pulp.LpMaximize)
     squad = problem.add_variable_dicts("squad", elements, cat="Binary")
@@ -208,6 +237,9 @@ def _best_squad_keeping(
     problem += pulp.lpSum(captain[e] for e in elements) == 1
     problem += pulp.lpSum(price[e] * squad[e] for e in elements) <= budget
     problem += pulp.lpSum(squad[e] for e in elements if e in owned) >= keep
+
+    for required in constraints.must_include:
+        problem += squad[required] == 1
 
     for element in elements:
         problem += starting[element] <= squad[element]

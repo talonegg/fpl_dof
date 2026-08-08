@@ -76,6 +76,11 @@ class SquadConstraints:
     Defaults are the real FPL rules from :mod:`fpl.domain.rules`. They are
     parameters here only so tests can build small worlds -- never so that a
     caller can quietly play a different game.
+
+    Note the starting XI's *shape* is not a parameter: ``STARTING_XI_LIMITS``
+    lives in the rules module, so an XI always needs 1 goalkeeper, 3 defenders,
+    2 midfielders and 1 forward at minimum. ``starting_size`` below 7 is
+    therefore infeasible no matter what is passed here.
     """
 
     budget: float = BUDGET_MILLIONS

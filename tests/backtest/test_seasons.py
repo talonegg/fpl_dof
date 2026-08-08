@@ -273,3 +273,19 @@ def test_the_load_behaves_like_the_mapping_callers_expect(monkeypatch):
     assert list(load) == ["2023-24"]
     assert len(load["2023-24"]) > 0
     assert dict(load.items())
+
+
+def test_error_metrics_are_sorted_best_first(monkeypatch):
+    """Sorting MAE descending puts the least accurate model top and reads as a ranking."""
+    from fpl.backtest import seasons as seasons_module
+
+    monkeypatch.setattr(seasons_module, "fetch_season_gameweeks", lambda season: make_season())
+    per_gameweek = compare_many(
+        SEASONS, [SeasonMeanPredictor(), NaiveFormPredictor()], first_gameweek=6
+    )
+
+    by_error = summarise_many(per_gameweek, "mae")
+    by_selection = summarise_many(per_gameweek, "top_15_mean_actual")
+
+    assert by_error["mae"].is_monotonic_increasing, "lower error must come first"
+    assert by_selection["top_15_mean_actual"].is_monotonic_decreasing

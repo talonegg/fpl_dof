@@ -174,3 +174,58 @@ def test_a_squad_that_is_not_fifteen_players_is_rejected():
 
     with pytest.raises(InfeasibleSquad, match="full fifteen"):
         plan_transfers(make_world(), OWNED[:10], horizon=5)
+
+
+# --- Regressions from the code review of dev..dev_ph4 ---
+
+
+def test_an_excluded_player_is_never_transferred_in():
+    """optimise_squad honours must_exclude; this path used to ignore it."""
+    from fpl.optimise.squad import SquadConstraints
+
+    world = make_world(upgrade_points=20.0)
+
+    plan = plan_transfers(world, OWNED, horizon=5, constraints=SquadConstraints(must_exclude=(22,)))
+
+    assert 22 not in plan.transfers_in
+
+
+def test_a_required_player_is_never_transferred_out():
+    from fpl.optimise.squad import SquadConstraints
+
+    world = make_world(upgrade_points=20.0)
+    # Element 20 is an owned forward the planner would otherwise sell.
+    plan = plan_transfers(world, OWNED, horizon=5, constraints=SquadConstraints(must_include=(20,)))
+
+    assert 20 not in plan.transfers_out
+
+
+def test_requiring_a_player_outside_the_pool_is_an_error():
+    from fpl.optimise.squad import InfeasibleSquad, SquadConstraints
+
+    with pytest.raises(InfeasibleSquad, match="not in the pool"):
+        plan_transfers(
+            make_world(),
+            OWNED,
+            horizon=5,
+            constraints=SquadConstraints(must_include=(9999,)),
+        )
+
+
+def test_the_search_covers_every_transfer_a_manager_could_make_for_free():
+    """Five banked free transfers must not exceed what the planner will consider."""
+    from fpl.domain.rules import MAX_ROLLED_FREE_TRANSFERS
+    from fpl.optimise.transfers import MAX_TRANSFERS_CONSIDERED
+
+    assert MAX_TRANSFERS_CONSIDERED >= MAX_ROLLED_FREE_TRANSFERS
+
+
+def test_five_free_transfers_can_all_be_used_when_they_pay():
+    world = make_world(upgrade_points=15.0)
+    for element in (17, 16, 10, 9):
+        world.loc[world["element"] == element, "expected_points"] = 15.0
+
+    plan = plan_transfers(world, OWNED, free_transfers=5, horizon=6)
+
+    assert plan.transfer_count >= 4
+    assert plan.hits == 0

@@ -69,6 +69,13 @@ def main() -> int:
 
     predictors = all_predictors()
     per_gameweek = compare_many(season_data, predictors, first_gameweek=args.first_gameweek)
+    if per_gameweek.empty:
+        # Reporting the failure and then crashing on the empty frame would be
+        # worse than either alone.
+        print("no usable season data — nothing to report", flush=True)
+        if load.failures:
+            print(f"all seasons failed to load: {load.failures}", flush=True)
+        return 1
 
     selection = summarise_many(per_gameweek, SELECTION_METRIC)
     by_season = per_gameweek.groupby(["model", "season"])[SELECTION_METRIC].mean().unstack()

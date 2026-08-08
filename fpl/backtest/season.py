@@ -16,7 +16,7 @@ slicing discipline.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import pandas as pd
 
@@ -95,6 +95,17 @@ def build_pool(history: pd.DataFrame, predictions: pd.DataFrame) -> pd.DataFrame
     if history.empty or predictions.empty:
         return pd.DataFrame()
 
+    # An optimiser cannot work without these; older archive seasons lack some
+    # of them, and filtering defensively only to dereference them two lines
+    # later would raise a bare KeyError instead of saying what is wrong.
+    required = ("price", "position", "team_name")
+    missing = [column for column in required if column not in history.columns]
+    if missing:
+        raise ValueError(
+            f"season data cannot be optimised over: missing {missing}. "
+            "Older archive seasons do not carry these."
+        )
+
     latest = history.sort_values("gameweek").groupby("element").last().reset_index()
     columns = [
         column
@@ -135,6 +146,7 @@ def simulate_season(
 
     squad: list[int] | None = None
     free_transfers = FREE_TRANSFERS_PER_GAMEWEEK
+    bank = 0.0
     outcomes: list[GameweekOutcome] = []
 
     for gameweek in targets:
@@ -156,47 +168,58 @@ def simulate_season(
             except InfeasibleSquad:
                 continue
             squad = [int(e) for e in chosen.players["element"]]
+            # Whatever the opening squad did not spend stays available. Without
+            # this the unspent balance is forfeited for the whole season, which
+            # quietly penalises every later transfer.
+            bank = max(0.0, constraints.budget - chosen.cost)
         else:
             owned_in_pool = pool[pool["element"].isin(squad)]
             if len(owned_in_pool) < constraints.squad_size:
-                # A player has vanished from the data (transferred abroad, say).
-                # Nothing sensible to do but hold; the missing player scores 0.
+                # A player has vanished from this gameweek's data. Hold, and
+                # let them score nothing -- but keep playing the season, which
+                # means selecting from whoever is left rather than abandoning
+                # every remaining gameweek.
                 pass
             else:
                 plan = plan_transfers(
                     pool,
                     squad,
+                    bank=bank,
                     free_transfers=free_transfers,
                     horizon=horizon,
                     constraints=constraints,
                 )
                 if plan.is_worth_it:
+                    sold = pool[pool["element"].isin(plan.transfers_out)]["price"].sum()
+                    bought = pool[pool["element"].isin(plan.transfers_in)]["price"].sum()
+                    bank = max(0.0, bank + float(sold) - float(bought))
                     squad = [e for e in squad if e not in set(plan.transfers_out)]
                     squad += plan.transfers_in
                     transfers = plan.transfer_count
                     hits_cost = plan.points_cost
 
-        free_transfers = (
-            min(free_transfers + 1, MAX_ROLLED_FREE_TRANSFERS)
-            if transfers == 0
-            else FREE_TRANSFERS_PER_GAMEWEEK
+        # FPL banks unused transfers and *deducts* the ones spent; it does not
+        # reset to one. Resetting charges hits a real manager would not pay.
+        free_transfers = min(
+            max(free_transfers - transfers, 0) + FREE_TRANSFERS_PER_GAMEWEEK,
+            MAX_ROLLED_FREE_TRANSFERS,
         )
 
         # Pick the eleven and the captain from the squad we now hold.
-        held = pool[pool["element"].isin(squad)]
-        try:
-            lineup = optimise_squad(
-                held,
-                SquadConstraints(
-                    budget=float(held["price"].sum()),
-                    max_per_club=constraints.squad_size,
-                    composition=constraints.composition,
-                    bench_weight=constraints.bench_weight,
-                ),
+        starting, captain = _pick_lineup(pool, squad, constraints)
+        if starting is None:
+            # Cannot field a legal eleven this week (players missing from the
+            # data). Score nothing rather than ending the season silently.
+            outcomes.append(
+                GameweekOutcome(
+                    gameweek=int(gameweek),
+                    points=0.0,
+                    transfers=transfers,
+                    hits_cost=hits_cost,
+                    captain=0,
+                    squad=list(squad),
+                )
             )
-            starting = [int(e) for e in lineup.starting["element"]]
-            captain = lineup.captain
-        except InfeasibleSquad:
             continue
 
         outcomes.append(
@@ -211,3 +234,33 @@ def simulate_season(
         )
 
     return SeasonResult(model=predictor.name, outcomes=outcomes)
+
+
+def _pick_lineup(
+    pool: pd.DataFrame, squad: list[int], constraints: SquadConstraints
+) -> tuple[list[int] | None, int]:
+    """Best legal eleven and captain from a held squad, or ``(None, 0)``.
+
+    ``replace`` rather than a fresh ``SquadConstraints``: constructing a new one
+    silently reverts every field the caller customised, so a squad of a
+    non-default size became unpickable.
+    """
+    held = pool[pool["element"].isin(squad)]
+    if held.empty:
+        return None, 0
+
+    try:
+        lineup = optimise_squad(
+            held,
+            replace(
+                constraints,
+                budget=float(held["price"].sum()),
+                max_per_club=constraints.squad_size,
+                must_include=(),
+                must_exclude=(),
+            ),
+        )
+    except InfeasibleSquad:
+        return None, 0
+
+    return [int(e) for e in lineup.starting["element"]], lineup.captain
