@@ -138,3 +138,70 @@ def test_transferring_costs_more_than_it_gains(season):
         "transfers now help — the churn problem may be fixed; update this test "
         "and docs/model-results.md"
     )
+
+
+# --- Across seasons: the evaluation that settles what one season could not ---
+
+
+@pytest.fixture(scope="module")
+def multi_season():
+    from fpl.backtest.seasons import load_seasons, season_capabilities
+
+    loaded = load_seasons(("2022-23", "2023-24", "2024-25", "2025-26"))
+    capabilities = season_capabilities(loaded)
+    usable = {c.season for c in capabilities if c.supports_components}
+    return {season: frame for season, frame in loaded.items() if season in usable}
+
+
+def test_four_seasons_are_usable_for_the_component_model(multi_season):
+    assert len(multi_season) == 4
+
+
+def test_older_seasons_are_readable_despite_not_being_utf8():
+    """2016-17 onwards are latin-1; a naive read raises UnicodeDecodeError."""
+    from fpl.sources.archive import fetch_season_gameweeks
+
+    season = fetch_season_gameweeks("2016-17")
+
+    assert len(season) > 10000
+
+
+def test_pooling_seasons_multiplies_the_paired_observations(multi_season):
+    """The whole reason for multi-season evaluation."""
+    from fpl.backtest.seasons import compare_many
+    from fpl.backtest.significance import compare_across_seasons
+    from fpl.models.components import ComponentPredictor
+    from fpl.models.naive import SeasonMeanPredictor
+
+    per_gameweek = compare_many(multi_season, [SeasonMeanPredictor(), ComponentPredictor(4)])
+    comparison = compare_across_seasons(per_gameweek, "Component(4)", "SeasonMean")
+
+    assert comparison.gameweeks > 100, "one season gives 33; four should give ~130"
+
+
+def test_the_season_mean_still_picks_the_best_top_fifteen(multi_season):
+    """Pins the finding. If a model finally beats it, this fails and says so."""
+    from fpl.backtest.baselines import all_predictors
+    from fpl.backtest.seasons import compare_many, summarise_many
+
+    per_gameweek = compare_many(multi_season, all_predictors())
+    summary = summarise_many(per_gameweek, "top_15_mean_actual")
+
+    assert summary.index[0] == "SeasonMean", (
+        f"{summary.index[0]} now out-picks the benchmark — update "
+        "docs/multi-season-results.md, CLAUDE.md and fpl/backtest/baselines.py"
+    )
+
+
+def test_ranking_skill_is_inverted_against_selection_skill(multi_season):
+    """The central finding: the worst ranker is the best selector."""
+    from fpl.backtest.baselines import all_predictors
+    from fpl.backtest.seasons import compare_many, summarise_many
+
+    per_gameweek = compare_many(multi_season, all_predictors())
+    ranking = summarise_many(per_gameweek, "rank_correlation")
+    selection = summarise_many(per_gameweek, "top_15_mean_actual")
+
+    # Best selector, worst ranker (Zero has no ranking, so exclude it).
+    assert selection.index[0] == "SeasonMean"
+    assert ranking.dropna().index[-1] == "SeasonMean"

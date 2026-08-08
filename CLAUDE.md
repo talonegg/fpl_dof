@@ -54,8 +54,20 @@ snapshot file rather than mocking ad hoc in the test body.
 **Models are evaluated, not just unit-tested.** A unit test proves the code runs.
 A backtest proves the model is worth using. Every predictor added to `fpl/models/`
 needs a `pytest -m backtest` case reporting its metrics against the baselines in
-`fpl/backtest/baselines.py`. A model that does not beat `NaiveFormPredictor` on
-held-out gameweeks does not get wired into the UI.
+`fpl/backtest/baselines.py`. A model that does not beat the benchmark
+(`SeasonMeanPredictor`) on held-out gameweeks does not get wired into the UI.
+
+**Evaluate on all four seasons, never one.** `scripts/backtest_seasons.py` is the
+authority; `scripts/backtest.py` is single-season and kept only for quick
+iteration. This is not pedantry — on 2025-26 alone the component model looked
+*indistinguishable* from the benchmark at selection; across four seasons it is
+*significantly worse*. One season had the sign wrong.
+
+**Rank correlation is a diagnostic, not a target.** Ranking skill and selection
+skill are inverted in this problem: the season mean is the worst ranker in the
+field and the best selector, and every model that ranks better picks worse. Rank
+correlation is dominated by the many players who score nothing; the top fifteen is
+a question about the tail. Optimising ranking has so far made selection worse.
 
 **Expected points and optimisation stay separate.** The predictor answers "how many
 points will this player score in GW N". The optimiser answers "given those numbers
