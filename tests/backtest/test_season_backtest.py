@@ -115,13 +115,16 @@ def test_a_simulated_season_scores_plausibly(season):
     assert 25 < result.points_per_gameweek < 90
 
 
-def test_transferring_costs_more_than_it_gains(season):
+def test_transferring_on_a_volatile_predictor_still_costs_more_than_it_gains(season):
     """Documents the finding, so a change that fixes it fails loudly here.
 
     The transfer planner scales a single gameweek's edge by the horizon, which
-    assumes the edge persists. It does not — predictions move week to week —
-    so the planner churns the squad and pays hits for noise. Until that is
-    fixed, holding beats transferring.
+    assumes the edge persists. It does not — predictions move week to week — so
+    with a responsive predictor the planner churns and pays hits for noise.
+
+    Note this is *predictor-specific*: the same planner beats holding when fed
+    the stable season mean. The earlier blanket claim that transferring always
+    loses was partly an artefact of the free-transfer accounting bug.
     """
     from fpl.backtest.season import simulate_season
     from fpl.models.components import ComponentPredictor
@@ -135,9 +138,25 @@ def test_transferring_costs_more_than_it_gains(season):
 
     assert transferring.transfers_made > 0, "the planner should be making transfers"
     assert holding.total_points > transferring.total_points, (
-        "transfers now help — the churn problem may be fixed; update this test "
-        "and docs/model-results.md"
+        "transfers now help even the volatile predictor — the churn problem may "
+        "be fixed; update this test, docs/optimiser-results.md and CLAUDE.md"
     )
+
+
+def test_transferring_on_a_stable_predictor_pays(season):
+    """The other half of the finding, which the earlier claim missed."""
+    from fpl.backtest.season import simulate_season
+    from fpl.models.naive import SeasonMeanPredictor
+
+    holding = simulate_season(
+        season, SeasonMeanPredictor(), first_gameweek=6, last_gameweek=20, horizon=0
+    )
+    transferring = simulate_season(
+        season, SeasonMeanPredictor(), first_gameweek=6, last_gameweek=20, horizon=5
+    )
+
+    assert transferring.total_points > holding.total_points
+    assert transferring.total_hits <= 8, "should be paying very few hits"
 
 
 # --- Across seasons: the evaluation that settles what one season could not ---
