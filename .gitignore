@@ -1,4 +1,10 @@
 venv/
 __pycache__/
 *.pyc
-.streamlit/
+.pytest_cache/
+.ruff_cache/
+
+# Local secrets. Note that data/fixtures/ IS committed -- tests depend on it.
+.streamlit/secrets.toml
+data/cache/
+.env
