@@ -17,6 +17,13 @@ def test_build_players_frame_has_readable_columns(bootstrap):
     assert (df["price"] > 0).all()
 
 
+def test_player_id_is_available_under_the_shared_element_name(bootstrap):
+    """Bootstrap says `id`; every other source says `element`. Joins need both."""
+    df = build_players_frame(bootstrap)
+
+    assert (df["element"] == df["id"]).all()
+
+
 def test_numeric_columns_are_not_left_as_strings(bootstrap):
     """The API sends these as strings; sorting them as text gives wrong answers."""
     df = build_players_frame(bootstrap)

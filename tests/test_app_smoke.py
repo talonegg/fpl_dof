@@ -17,39 +17,51 @@ APP_TIMEOUT_SECONDS = 60
 APP_PATH = str(Path(__file__).resolve().parent.parent / "streamlit_app.py")
 
 
-def _run_app(monkeypatch, bootstrap, fixtures_snapshot) -> AppTest:
+def _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive) -> AppTest:
     """Run the whole app offline.
 
-    Both fetches must be patched: the fixtures tab reaches for a second
-    endpoint, and an unpatched one would silently hit the live API.
+    Every fetch must be patched. Each tab that reaches for a new source is a
+    fresh chance to silently go online in what is supposed to be a unit test,
+    so this list grows with the app.
     """
     # The fixtures snapshot carries all 20 teams; the bootstrap sample carries
     # 4. Use the full list so opponents resolve to names.
     full_bootstrap = {**bootstrap, "teams": fixtures_snapshot["teams"]}
     monkeypatch.setattr("app.data.fetch_bootstrap", lambda: full_bootstrap)
     monkeypatch.setattr("app.data.fetch_fixtures", lambda: fixtures_snapshot["fixtures"])
+    monkeypatch.setattr("app.data.fetch_season_gameweeks", lambda season: archive)
+    # Keep the watchlist out of the real data directory. This goes through the
+    # environment because AppTest re-executes the script, so a module-level
+    # constant patched here would just be redefined.
+    monkeypatch.setenv("FPL_DOF_DATA_DIR", str(tmp_path))
     # The loaders are cached, so a previous run's data would otherwise leak in.
     st.cache_data.clear()
     return AppTest.from_file(APP_PATH, default_timeout=APP_TIMEOUT_SECONDS).run()
 
 
-def test_app_renders_without_exception(monkeypatch, bootstrap, fixtures_snapshot):
-    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot)
+def test_app_renders_without_exception(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
 
     assert not at.exception
     assert at.title[0].value == "FPL Data Explorer"
 
 
-def test_app_shows_every_player_from_the_source(monkeypatch, bootstrap, fixtures_snapshot):
-    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot)
+def test_app_shows_every_player_from_the_source(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
 
     expected = len(bootstrap["elements"])
     captions = [caption.value for caption in at.caption]
     assert f"Showing {expected} of {expected} players." in captions
 
 
-def test_filtering_to_one_position_narrows_the_table(monkeypatch, bootstrap, fixtures_snapshot):
-    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot)
+def test_filtering_to_one_position_narrows_the_table(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
 
     at.sidebar.multiselect[0].set_value(["Goalkeeper"]).run()
 
@@ -60,9 +72,9 @@ def test_filtering_to_one_position_narrows_the_table(monkeypatch, bootstrap, fix
 
 
 def test_empty_filter_selection_warns_instead_of_crashing(
-    monkeypatch, bootstrap, fixtures_snapshot
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
 ):
-    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot)
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
 
     at.sidebar.multiselect[0].set_value([]).run()
 
@@ -70,8 +82,10 @@ def test_empty_filter_selection_warns_instead_of_crashing(
     assert "No players match" in at.warning[0].value
 
 
-def test_fixture_ticker_renders_with_a_row_per_team(monkeypatch, bootstrap, fixtures_snapshot):
-    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot)
+def test_fixture_ticker_renders_with_a_row_per_team(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
 
     assert not at.exception
     assert "Fixture ticker" in [header.value for header in at.subheader]
@@ -80,9 +94,41 @@ def test_fixture_ticker_renders_with_a_row_per_team(monkeypatch, bootstrap, fixt
 
 
 def test_fixture_ticker_reports_no_blanks_in_a_normal_window(
-    monkeypatch, bootstrap, fixtures_snapshot
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
 ):
-    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot)
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
 
     captions = " ".join(caption.value for caption in at.caption)
     assert "No blank or double gameweeks" in captions
+
+
+def test_scouting_tab_renders_player_detail(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    assert not at.exception
+    headers = [header.value for header in at.subheader]
+    assert "Player detail" in headers
+    assert "Compare players" in headers
+
+
+def test_comparison_asks_for_two_players_before_charting(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    messages = [info.value for info in at.info]
+    assert any("at least two players" in message for message in messages)
+
+
+def test_watchlist_starts_empty_and_persists_a_selection(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    captions = [caption.value for caption in at.sidebar.caption]
+    assert "Nothing watched yet." in captions
+
+    watchlist_widget = at.session_state["watchlist_select"]
+    assert watchlist_widget == []

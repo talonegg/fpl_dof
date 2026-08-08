@@ -41,6 +41,35 @@ def schedule(fixtures_snapshot):
 
 
 @pytest.fixture
+def archive(bootstrap) -> Any:
+    """A small stand-in for a season of archive rows.
+
+    Built from the bootstrap sample's own players so that cross-season name
+    matching actually resolves, which is what the scouting views depend on.
+    """
+    import pandas as pd
+
+    rows = []
+    for element in bootstrap["elements"][:4]:
+        name = f"{element['first_name']} {element['second_name']}"
+        for gameweek in (1, 2, 3):
+            rows.append(
+                {
+                    "player_name": name,
+                    "gameweek": gameweek,
+                    "element": element["id"],
+                    "team_name": "Arsenal",
+                    "position": "MID",
+                    "minutes": 90,
+                    "total_points": gameweek + 1,
+                    "price": 5.5,
+                    "season": "2025-26",
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+@pytest.fixture
 def fake_fetcher(bootstrap, fixtures_snapshot):
     """A :data:`fpl.sources.fpl_api.Fetcher` that serves the frozen snapshots.
 

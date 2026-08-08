@@ -7,4 +7,6 @@ __pycache__/
 # Local secrets. Note that data/fixtures/ IS committed -- tests depend on it.
 .streamlit/secrets.toml
 data/cache/
+# Personal, and rewritten on every selection.
+data/watchlist.json
 .env
