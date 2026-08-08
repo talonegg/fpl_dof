@@ -1,5 +1,8 @@
 # Direct runtime dependencies only -- not a `pip freeze` dump.
 # Transitive packages are resolved by pip and must not be listed here.
 pandas==3.0.5
+# Streamlit happens to pull pyarrow in too, but fpl/sources/cache.py uses it
+# directly for the parquet cache, so it is declared here in its own right.
+pyarrow==24.0.0
 requests==2.34.2
 streamlit==1.61.1

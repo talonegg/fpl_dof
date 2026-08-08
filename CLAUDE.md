@@ -76,6 +76,12 @@ transfer cost 4 points per extra transfer. Do not hardcode these anywhere else.
   them at the boundary; add any new such column to `NUMERIC_STRING_COLUMNS`.
 - Player identity is `element` id, which is **not stable across seasons**. Any
   cross-season join must go through the name+team mapping in `fpl/domain/identity.py`.
+  `element_code` (in `history_past`) *is* stable and is preferred where available.
+- The API serves only the current season, and only *now*. Past-season per-gameweek
+  data comes from `fpl/sources/archive.py`; point-in-time captures of the live
+  state come from `fpl/sources/snapshot.py`, written daily by
+  `.github/workflows/snapshot.yml` onto the `data` branch. Never reconstruct
+  "what was true before gameweek N" from today's API — that is lookahead.
 - All cached data is timestamped. Anything older than the current gameweek deadline
   is stale and must be refetched.
 

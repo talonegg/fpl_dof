@@ -1,0 +1,57 @@
+name: Snapshot FPL data
+
+# The API only serves the current state, so capture it daily and keep the
+# history on a dedicated `data` branch. Keeping it off `main` means these
+# commits never trigger a redeploy of the app.
+on:
+  schedule:
+    # 06:00 UTC daily. Gameweek deadlines are typically Friday/Saturday
+    # morning, so this reliably lands a capture before each one.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check out the data branch into ./snapshots
+        run: |
+          git fetch origin data --depth=1 || echo "no data branch yet"
+          if git rev-parse --verify origin/data >/dev/null 2>&1; then
+            git worktree add snapshots origin/data
+          else
+            git worktree add --detach snapshots
+            cd snapshots
+            git checkout --orphan data
+            git rm -rf --quiet . || true
+          fi
+
+      - name: Capture the snapshot
+        run: python scripts/snapshot.py --root snapshots
+
+      - name: Commit if anything changed
+        working-directory: snapshots
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "no change since the last snapshot"
+          else
+            git commit -m "Snapshot FPL data $(date -u +%Y-%m-%d)"
+            git push origin HEAD:data
+          fi

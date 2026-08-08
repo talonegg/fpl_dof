@@ -41,3 +41,18 @@ def fetch_bootstrap(fetcher: Fetcher = http_fetcher) -> dict[str, Any]:
     so nearly everything downstream starts here.
     """
     return fetcher(f"{BASE_URL}/bootstrap-static/")
+
+
+def fetch_fixtures(fetcher: Fetcher = http_fetcher) -> list[dict[str, Any]]:
+    """Fetch all 380 fixtures for the season, played and unplayed."""
+    return fetcher(f"{BASE_URL}/fixtures/")
+
+
+def fetch_player_summary(element_id: int, fetcher: Fetcher = http_fetcher) -> dict[str, Any]:
+    """Fetch one player's gameweek history, past seasons and remaining fixtures.
+
+    Note ``history`` is empty until the player has actually played, so before
+    the season starts this returns per-season summaries only. Historical
+    per-gameweek data for modelling comes from :mod:`fpl.sources.archive`.
+    """
+    return fetcher(f"{BASE_URL}/element-summary/{element_id}/")
