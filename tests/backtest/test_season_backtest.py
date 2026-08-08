@@ -147,10 +147,14 @@ def test_transferring_costs_more_than_it_gains(season):
 def multi_season():
     from fpl.backtest.seasons import load_seasons, season_capabilities
 
-    loaded = load_seasons(("2022-23", "2023-24", "2024-25", "2025-26"))
-    capabilities = season_capabilities(loaded)
+    load = load_seasons(("2022-23", "2023-24", "2024-25", "2025-26"))
+    if load.failures:
+        # A silently dropped season would weaken every assertion below without
+        # failing any of them.
+        pytest.skip(f"could not load seasons: {load.failures}")
+    capabilities = season_capabilities(load.seasons)
     usable = {c.season for c in capabilities if c.supports_components}
-    return {season: frame for season, frame in loaded.items() if season in usable}
+    return {season: frame for season, frame in load.items() if season in usable}
 
 
 def test_four_seasons_are_usable_for_the_component_model(multi_season):

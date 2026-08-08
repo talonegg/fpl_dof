@@ -20,6 +20,8 @@ from fpl.backtest.harness import DEFAULT_FIRST_GAMEWEEK  # noqa: E402
 from fpl.backtest.metrics import DEFAULT_TOP_N  # noqa: E402
 from fpl.backtest.seasons import (  # noqa: E402
     ALL_SEASONS,
+    CURRENT_RULES_SEASON,
+    EVALUATION_SEASONS,
     compare_many,
     load_seasons,
     season_capabilities,
@@ -38,10 +40,20 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, default=Path("docs/multi-season-results.md"))
     parser.add_argument("--first-gameweek", type=int, default=DEFAULT_FIRST_GAMEWEEK)
+    parser.add_argument(
+        "--all-seasons",
+        action="store_true",
+        help="survey every season the archive publishes, not just the usable ones "
+        "(slow: downloads six seasons that no current model can use)",
+    )
     args = parser.parse_args()
 
     print("loading seasons...", flush=True)
-    loaded = load_seasons(ALL_SEASONS)
+    load = load_seasons(ALL_SEASONS if args.all_seasons else EVALUATION_SEASONS)
+    loaded = load.seasons
+    if load.failures:
+        # Never let a download failure quietly shrink the evidence base.
+        print(f"FAILED to load: {load.failures}", flush=True)
     capabilities = season_capabilities(loaded)
 
     # Compare every model on the same seasons, or the comparison is unfair.
@@ -59,6 +71,7 @@ def main() -> int:
     per_gameweek = compare_many(season_data, predictors, first_gameweek=args.first_gameweek)
 
     selection = summarise_many(per_gameweek, SELECTION_METRIC)
+    by_season = per_gameweek.groupby(["model", "season"])[SELECTION_METRIC].mean().unstack()
     ranking = summarise_many(per_gameweek, "rank_correlation")
     against = season_comparison_table(per_gameweek, BENCHMARK.name, SELECTION_METRIC)
     against_ranking = season_comparison_table(per_gameweek, BENCHMARK.name, "rank_correlation")
@@ -67,6 +80,7 @@ def main() -> int:
         f"| {c.season} | {c.rows} | {c.gameweeks} | "
         f"{'yes' if c.supports_components else 'no'} | "
         f"{'yes' if c.supports_expected_goals else 'no'} | "
+        f"{'yes' if c.matches_current_rules else 'no'} | "
         f"{', '.join(c.missing) or '—'} |"
         for c in sorted(capabilities, key=lambda c: c.season)
     )
@@ -82,6 +96,12 @@ def main() -> int:
         f"- Benchmark: **{BENCHMARK.name}**",
         f"- Paired observations: **{len(per_gameweek) // max(len(predictors), 1)}** "
         "per model, against 33 for a single season",
+        (
+            f"- **Seasons that failed to load: {', '.join(sorted(load.failures))}** — "
+            "the numbers below are based on fewer seasons than intended."
+            if load.failures
+            else "- All requested seasons loaded."
+        ),
         "",
         "## What each season supports",
         "",
@@ -91,9 +111,16 @@ def main() -> int:
         "supporting all of them — because comparing models over different "
         "seasons measures the seasons, not the models.",
         "",
-        "| Season | Rows | GWs | Components | Expected goals | Missing |",
-        "|---|---|---|---|---|---|",
+        "| Season | Rows | GWs | Components | Expected goals | Current rules | Missing |",
+        "|---|---|---|---|---|---|---|",
         capability_rows,
+        "",
+        "**Current rules** means the season included defensive contribution "
+        "points, which were introduced in 2025-26 and continue in 2026-27. "
+        "Seasons without them were played under different scoring, so a model "
+        "judged on them is being judged at a game nobody is playing any more. "
+        "That is a stronger caveat than a missing column and it applies to three "
+        "of the four seasons pooled below.",
         "",
         "## Selection: what the predicted top 15 actually scored",
         "",
@@ -102,6 +129,14 @@ def main() -> int:
         "only luckier somewhere.",
         "",
         to_markdown_table(selection.round(3)),
+        "",
+        "### Season by season",
+        "",
+        f"Only **{CURRENT_RULES_SEASON}** was played under the current scoring "
+        "rules. Read that column separately from the rest — the pooled mean "
+        "above averages it with three seasons of superseded rules.",
+        "",
+        to_markdown_table(by_season.round(3)),
         "",
         "## Ranking: Spearman correlation of predicted and actual",
         "",
@@ -139,13 +174,27 @@ def main() -> int:
         "(t = -2.56). The extra data did not sharpen a small edge — it revealed "
         "the sign was wrong.",
         "",
-        "**Nothing built in Phase 3 beats a season average at picking players.** "
-        "The closest is OpponentAdjusted, which is merely indistinguishable. "
-        "Treat rank correlation as a diagnostic only: optimising it has, so far, "
-        "made selection worse.",
+        "**But the pooled verdict is driven by seasons nobody is playing any "
+        f"more.** Look at the {CURRENT_RULES_SEASON} column season by season: "
+        "the season mean is *fourth*, behind OpponentAdjusted and both component "
+        "models. Its wins come from the three pre-defensive-contribution "
+        "seasons. On the only season scored under current rules, the ordering "
+        "reverses.",
         "",
-        "**Caveat.** Four seasons of one league, sharing many of the same players "
-        "and scoring rules. Independent they are not.",
+        "That is one season and 33 gameweeks — the same sample that got the sign "
+        "wrong before, so it is a caution rather than a conclusion. It cannot be "
+        "distinguished from ordinary season-to-season variation until 2026-27 "
+        "provides a second season under these rules. But it does mean the "
+        "confident pooled result should not be read as settled for the season "
+        "being played.",
+        "",
+        "**Nothing built in Phase 3 beats a season average across the pool.** "
+        "Treat rank correlation as a diagnostic only: optimising it has, so far, "
+        "made pooled selection worse.",
+        "",
+        "**Caveat.** Four seasons of one league, sharing many of the same "
+        "players, and — importantly — not sharing the same scoring rules. "
+        "Independent they are not.",
         "",
     ]
 

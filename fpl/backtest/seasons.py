@@ -7,11 +7,14 @@ but because the evidence about them stops being ambiguous.
 
 Two things make this more than a loop:
 
-**Seasons are not interchangeable.** The archive gained expected goals in
-2022-23 and defensive contributions in 2025-26, and the older files are not
-even UTF-8. A model asked to run on a season lacking its inputs does not fail,
-it silently gets worse -- so :func:`season_capabilities` reports what each
-season can support, and callers select rather than assume.
+**Seasons are not interchangeable, and the deeper problem is not missing
+columns but changed rules.** The archive gained expected goals in 2022-23 and
+the older files are not even UTF-8, which is merely inconvenient. Defensive
+contributions are different: they were introduced in 2025-26 and continue into
+2026-27, so seasons before that were *played under different scoring*. A model
+evaluated on them is being judged at a game that is no longer the one being
+played. :func:`season_capabilities` reports this per season, and
+``matches_current_rules`` marks the ones that still count in full.
 
 **Element ids are season-scoped.** Player 233 in 2022-23 is not player 233 in
 2025-26. So each season is replayed independently and only the *metrics* are
@@ -43,10 +46,27 @@ ALL_SEASONS = (
     "2025-26",
 )
 
+# Seasons worth downloading for an evaluation. Expected goals first appear in
+# 2022-23, and every model in fpl/models/ that is not a pure baseline needs
+# them, so the six earlier seasons cost minutes of download and contribute
+# nothing. Widen this deliberately if a model appears that can use them.
+EVALUATION_SEASONS = ("2022-23", "2023-24", "2024-25", "2025-26")
+
 # What a model needs present to be worth running at all.
 REQUIRED_FOR_ANY_MODEL = ("element", "gameweek", "total_points", "minutes")
 REQUIRED_FOR_COMPONENTS = ("position",)
 REQUIRED_FOR_EXPECTED_GOALS = ("expected_goals", "expected_assists")
+REQUIRED_FOR_DEFENSIVE_CONTRIBUTIONS = ("defensive_contribution",)
+
+# Defensive contribution points were introduced in 2025-26 and continue in
+# 2026-27. Earlier seasons were played under rules with no such route to
+# points at all -- the column is not merely missing from the archive, the
+# scoring did not exist.
+DEFENSIVE_CONTRIBUTIONS_FROM = "2025-26"
+
+# The season whose rules match the one currently being played. Evidence from
+# it is worth more than evidence from seasons scored under superseded rules.
+CURRENT_RULES_SEASON = "2025-26"
 
 
 @dataclass(frozen=True)
@@ -59,7 +79,19 @@ class SeasonCapability:
     supports_basic: bool
     supports_components: bool
     supports_expected_goals: bool
+    supports_defensive_contributions: bool
     missing: tuple[str, ...]
+
+    @property
+    def matches_current_rules(self) -> bool:
+        """Whether this season was scored under the rules now in force.
+
+        Defensive contributions are the difference. A season without them is
+        not just missing a column -- it was played under scoring where that
+        route to points did not exist, so a model's performance on it says
+        less about the season being played now.
+        """
+        return self.supports_defensive_contributions
 
 
 def season_capabilities(
@@ -89,25 +121,56 @@ def season_capabilities(
                     c in columns for c in (*REQUIRED_FOR_ANY_MODEL, *REQUIRED_FOR_COMPONENTS)
                 ),
                 supports_expected_goals=all(c in columns for c in REQUIRED_FOR_EXPECTED_GOALS),
+                supports_defensive_contributions=all(
+                    c in columns for c in REQUIRED_FOR_DEFENSIVE_CONTRIBUTIONS
+                ),
                 missing=missing,
             )
         )
     return capabilities
 
 
-def load_seasons(seasons: tuple[str, ...] = ALL_SEASONS) -> dict[str, pd.DataFrame]:
-    """Fetch several seasons, skipping any that cannot be read.
+@dataclass
+class SeasonLoad:
+    """Seasons that loaded, and the ones that did not.
 
-    A season that fails to download or parse is omitted with its name recorded
-    in the result's absence, rather than taking the whole evaluation down.
+    Failures are carried rather than swallowed. A transient download error
+    silently dropping a season shrinks the evidence base without changing
+    anything visible in the numbers -- which is how a four-season conclusion
+    quietly becomes a three-season one.
     """
-    loaded = {}
+
+    seasons: dict[str, pd.DataFrame]
+    failures: dict[str, str]
+
+    def __iter__(self):
+        return iter(self.seasons)
+
+    def __len__(self) -> int:
+        return len(self.seasons)
+
+    def __getitem__(self, season: str) -> pd.DataFrame:
+        return self.seasons[season]
+
+    def items(self):
+        return self.seasons.items()
+
+
+def load_seasons(seasons: tuple[str, ...] = ALL_SEASONS) -> SeasonLoad:
+    """Fetch several seasons, recording rather than hiding any that fail.
+
+    One unreadable season must not stop the rest -- older files have their own
+    problems -- but the caller has to be told, because the alternative is an
+    evaluation that reports fewer seasons than it claims.
+    """
+    loaded: dict[str, pd.DataFrame] = {}
+    failures: dict[str, str] = {}
     for season in seasons:
         try:
             loaded[season] = fetch_season_gameweeks(season)
-        except Exception:  # noqa: BLE001 - one bad season must not stop the rest
-            continue
-    return loaded
+        except Exception as error:  # noqa: BLE001 - one bad season must not stop the rest
+            failures[season] = f"{type(error).__name__}: {error}"
+    return SeasonLoad(seasons=loaded, failures=failures)
 
 
 def replay_many(

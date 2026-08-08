@@ -180,3 +180,96 @@ def test_any_metric_can_be_compared(metric):
 
     assert result.metric == metric
     assert result.gameweeks > 0
+
+
+# --- Scoring rules changed, which makes seasons more than "missing a column" ---
+
+
+def make_season_with_defcon(**kwargs):
+    season = make_season(**kwargs)
+    season["defensive_contribution"] = 8
+    return season
+
+
+def test_a_season_with_defensive_contributions_matches_current_rules():
+    """Defcons arrived in 2025-26 and continue in 2026-27."""
+    capability = season_capabilities({"2025-26": make_season_with_defcon()})[0]
+
+    assert capability.supports_defensive_contributions
+    assert capability.matches_current_rules
+
+
+def test_an_older_season_does_not_match_current_rules():
+    """Not merely a missing column — that route to points did not exist."""
+    capability = season_capabilities({"2023-24": make_season()})[0]
+
+    assert not capability.supports_defensive_contributions
+    assert not capability.matches_current_rules
+
+
+def test_a_season_can_support_the_component_model_yet_predate_the_rules():
+    """The distinction that matters: usable for evaluation, but not current."""
+    capability = season_capabilities({"2023-24": make_season()})[0]
+
+    assert capability.supports_components
+    assert capability.supports_expected_goals
+    assert not capability.matches_current_rules
+
+
+# --- A season that fails to load must be reported, never silently dropped ---
+
+
+def test_a_successful_load_reports_no_failures(monkeypatch):
+    from fpl.backtest import seasons as seasons_module
+
+    monkeypatch.setattr(seasons_module, "fetch_season_gameweeks", lambda season: make_season())
+
+    load = seasons_module.load_seasons(("2023-24", "2024-25"))
+
+    assert len(load) == 2
+    assert load.failures == {}
+
+
+def test_a_failed_season_is_recorded_rather_than_swallowed(monkeypatch):
+    """A dropped season shrinks the evidence base without changing the numbers."""
+    from fpl.backtest import seasons as seasons_module
+
+    def flaky(season):
+        if season == "2024-25":
+            raise OSError("connection reset")
+        return make_season()
+
+    monkeypatch.setattr(seasons_module, "fetch_season_gameweeks", flaky)
+
+    load = seasons_module.load_seasons(("2023-24", "2024-25"))
+
+    assert set(load.seasons) == {"2023-24"}
+    assert "2024-25" in load.failures
+    assert "connection reset" in load.failures["2024-25"]
+
+
+def test_one_bad_season_does_not_stop_the_others(monkeypatch):
+    from fpl.backtest import seasons as seasons_module
+
+    def flaky(season):
+        if season == "2022-23":
+            raise ValueError("bad file")
+        return make_season()
+
+    monkeypatch.setattr(seasons_module, "fetch_season_gameweeks", flaky)
+
+    load = seasons_module.load_seasons(("2022-23", "2023-24", "2024-25"))
+
+    assert len(load) == 2
+
+
+def test_the_load_behaves_like_the_mapping_callers_expect(monkeypatch):
+    from fpl.backtest import seasons as seasons_module
+
+    monkeypatch.setattr(seasons_module, "fetch_season_gameweeks", lambda season: make_season())
+
+    load = seasons_module.load_seasons(("2023-24",))
+
+    assert list(load) == ["2023-24"]
+    assert len(load["2023-24"]) > 0
+    assert dict(load.items())

@@ -63,6 +63,20 @@ iteration. This is not pedantry — on 2025-26 alone the component model looked
 *indistinguishable* from the benchmark at selection; across four seasons it is
 *significantly worse*. One season had the sign wrong.
 
+**But the seasons are not scored under the same rules.** Defensive contribution
+points arrived in 2025-26 and continue in 2026-27; the three earlier seasons had
+no such route to points. So 2025-26 is the only season whose rules match the one
+being played, and on it the pooled ordering reverses — the season mean drops to
+fourth. Read the per-season table, not just the pooled mean, and weight
+2025-26 accordingly. A second current-rules season (2026-27) is what would
+settle it.
+
+**Model defensive contributions.** 2 points for clearing a threshold of defensive
+actions: 10 CBIT for defenders, 12 CBIRT for midfielders and forwards,
+goalkeepers ineligible. `ComponentPredictor` scores them and degrades to zero on
+seasons lacking the column — correct for those seasons, but it means pre-2025-26
+results understate any DC-aware model.
+
 **Rank correlation is a diagnostic, not a target.** Ranking skill and selection
 skill are inverted in this problem: the season mean is the worst ranker in the
 field and the best selector, and every model that ranks better picks worse. Rank
