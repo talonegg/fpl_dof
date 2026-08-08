@@ -67,3 +67,74 @@ def test_every_baseline_produces_a_comparable_row(season):
 
     assert len(table) == len(baseline_predictors())
     assert table["gameweeks"].min() > 30
+
+
+# --- The whole system, playing a real season ---
+
+
+def test_the_optimiser_produces_a_legal_squad_from_real_data(season):
+    """The constraints must survive contact with 700 real players."""
+    from fpl.backtest.season import build_pool, simulate_season
+    from fpl.domain.rules import MAX_PLAYERS_PER_CLUB, SQUAD_COMPOSITION
+    from fpl.models.components import ComponentPredictor
+
+    result = simulate_season(
+        season, ComponentPredictor(4), first_gameweek=10, last_gameweek=12, horizon=0
+    )
+
+    assert result.outcomes
+    assert len(result.outcomes[0].squad) == 15
+
+    # Re-derive the squad's shape from the pool to check it is legal.
+    from fpl.backtest.harness import known_fixtures, prepare_season
+
+    prepared = prepare_season(season)
+    history = prepared[prepared["gameweek"] < 10]
+    pool = build_pool(
+        history,
+        ComponentPredictor(4).predict(history, 10, known_fixtures(prepared, 10)),
+    )
+    chosen = pool[pool["element"].isin(result.outcomes[0].squad)]
+
+    counts = chosen["position"].value_counts()
+    for position, expected in SQUAD_COMPOSITION.items():
+        assert counts.get(position, 0) == expected
+    assert chosen["team"].value_counts().max() <= MAX_PLAYERS_PER_CLUB
+    assert chosen["price"].sum() <= 100.0
+
+
+def test_a_simulated_season_scores_plausibly(season):
+    """A sanity band, not a target: real FPL managers average roughly 40-70."""
+    from fpl.backtest.season import simulate_season
+    from fpl.models.components import ComponentPredictor
+
+    result = simulate_season(
+        season, ComponentPredictor(4), first_gameweek=10, last_gameweek=16, horizon=0
+    )
+
+    assert 25 < result.points_per_gameweek < 90
+
+
+def test_transferring_costs_more_than_it_gains(season):
+    """Documents the finding, so a change that fixes it fails loudly here.
+
+    The transfer planner scales a single gameweek's edge by the horizon, which
+    assumes the edge persists. It does not — predictions move week to week —
+    so the planner churns the squad and pays hits for noise. Until that is
+    fixed, holding beats transferring.
+    """
+    from fpl.backtest.season import simulate_season
+    from fpl.models.components import ComponentPredictor
+
+    holding = simulate_season(
+        season, ComponentPredictor(4), first_gameweek=10, last_gameweek=20, horizon=0
+    )
+    transferring = simulate_season(
+        season, ComponentPredictor(4), first_gameweek=10, last_gameweek=20, horizon=5
+    )
+
+    assert transferring.transfers_made > 0, "the planner should be making transfers"
+    assert holding.total_points > transferring.total_points, (
+        "transfers now help — the churn problem may be fixed; update this test "
+        "and docs/model-results.md"
+    )

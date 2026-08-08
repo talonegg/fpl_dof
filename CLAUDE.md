@@ -62,6 +62,13 @@ points will this player score in GW N". The optimiser answers "given those numbe
 and the FPL rules, what is the best squad". Never let a heuristic about budget or
 team limits leak into a predictor.
 
+**Squad selection is solved; transfer timing is not.** `fpl/optimise/squad.py`
+returns a provably optimal squad — trust it. `fpl/optimise/transfers.py` currently
+*loses* points against simply holding the squad, because it scales one gameweek's
+edge by the horizon and so churns on noise. See `docs/optimiser-results.md`. Do
+not wire transfer recommendations into the UI until a season simulation shows
+them beating a hold.
+
 **FPL rules live in one place** — `fpl/domain/rules.py`. Budget 100.0, 15-player
 squad (2 GK / 5 DEF / 5 MID / 3 FWD), max 3 per club, valid starting XI formations,
 transfer cost 4 points per extra transfer. Do not hardcode these anywhere else.
