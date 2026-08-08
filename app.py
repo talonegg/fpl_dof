@@ -4,6 +4,8 @@ import pandas as pd
 
 from data.reference import add_readable_columns
 
+st.set_page_config(page_title="FPL Data Explorer", layout="wide")
+
 st.title("FPL Data Explorer")
 
 response = requests.get("https://fantasy.premierleague.com/api/bootstrap-static/")
@@ -64,4 +66,4 @@ else:
     sorted_df = filtered_df
 
 st.write(f"Showing {len(sorted_df)} players.")
-st.dataframe(sorted_df[display_columns])
+st.dataframe(sorted_df[display_columns], use_container_width=True)
