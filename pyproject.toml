@@ -10,6 +10,13 @@ addopts = "-q --strict-markers"
 markers = [
     "backtest: slow historical model-evaluation runs (deselect with '-m \"not backtest\"')",
 ]
+filterwarnings = [
+    # PuLP's bundled CBC is deprecated in favour of a separately installed
+    # binary, which costs 135MB and is not discovered automatically. The
+    # bundled solver works; fpl/optimise/squad.py already prefers COIN_CMD if
+    # it ever becomes available, so this is noise until PuLP 4 lands.
+    "ignore:PULP_CBC_CMD is deprecated:DeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 100
