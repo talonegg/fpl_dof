@@ -152,3 +152,31 @@ def test_a_perfectly_consistent_gap_is_conclusive_not_unmeasurable():
 
     assert consistent.is_distinguishable
     assert consistent.verdict == "better than the benchmark"
+
+
+def test_a_lower_error_is_reported_as_better_not_worse():
+    """MAE improves downwards; a naive sign test calls a better model worse."""
+    lower_error = Comparison(
+        "A", "B", "mae", gameweeks=33, wins=0, mean_difference=-0.108, t_statistic=-19.65
+    )
+
+    assert lower_error.is_improvement
+    assert lower_error.verdict == "better than the benchmark"
+
+
+def test_a_higher_error_is_reported_as_worse():
+    higher_error = Comparison(
+        "A", "B", "rmse", gameweeks=33, wins=33, mean_difference=0.108, t_statistic=19.65
+    )
+
+    assert not higher_error.is_improvement
+    assert higher_error.verdict == "worse than the benchmark"
+
+
+def test_more_is_better_for_everything_that_is_not_an_error_metric():
+    more = Comparison(
+        "A", "B", "rank_correlation", gameweeks=33, wins=33, mean_difference=0.055, t_statistic=11.3
+    )
+
+    assert more.is_improvement
+    assert more.verdict == "better than the benchmark"

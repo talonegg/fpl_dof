@@ -8,6 +8,7 @@ held-out gameweeks, before it gets wired into the UI.
 from __future__ import annotations
 
 from fpl.models.base import Predictor
+from fpl.models.components import ComponentPredictor
 from fpl.models.minutes import MinutesAdjustedPredictor, OpponentAdjustedPredictor
 from fpl.models.naive import NaiveFormPredictor, SeasonMeanPredictor, ZeroPredictor
 
@@ -30,6 +31,11 @@ def candidate_predictors() -> list[Predictor]:
         MinutesAdjustedPredictor(minutes_window=4),
         MinutesAdjustedPredictor(minutes_window=6),
         OpponentAdjustedPredictor(minutes_window=4),
+        ComponentPredictor(minutes_window=4),
+        ComponentPredictor(minutes_window=6),
+        # The controlled experiment: identical model, actual goals instead of
+        # expected goals. Isolates whether xG is carrying any weight.
+        ComponentPredictor(minutes_window=4, use_expected_goals=False),
     ]
 
 

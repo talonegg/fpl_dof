@@ -29,6 +29,10 @@ from fpl.models.base import Predictor
 
 DEFAULT_METRIC = f"top_{DEFAULT_TOP_N}_mean_actual"
 
+# Most metrics here are "more is better". Error metrics are not, and a verdict
+# that assumes otherwise reports a genuinely more accurate model as worse.
+LOWER_IS_BETTER = frozenset({"mae", "rmse"})
+
 # |t| below this is noise; above it is worth a second look. Two is the
 # conventional rough threshold and is about right for a smell test.
 SIGNIFICANCE_THRESHOLD = 2.0
@@ -52,14 +56,21 @@ class Comparison:
         return abs(self.t_statistic) >= SIGNIFICANCE_THRESHOLD
 
     @property
+    def is_improvement(self) -> bool:
+        """Whether the difference points the right way for this metric.
+
+        Error metrics improve downwards, so a raw ``mean_difference > 0`` test
+        would report a more accurate model as worse.
+        """
+        if self.metric in LOWER_IS_BETTER:
+            return self.mean_difference < 0
+        return self.mean_difference > 0
+
+    @property
     def verdict(self) -> str:
         if not self.is_distinguishable:
             return "indistinguishable from the benchmark"
-        return (
-            "better than the benchmark"
-            if self.mean_difference > 0
-            else ("worse than the benchmark")
-        )
+        return "better than the benchmark" if self.is_improvement else "worse than the benchmark"
 
 
 def compare_to_benchmark(

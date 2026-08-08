@@ -76,6 +76,15 @@ def main() -> int:
     against_benchmark = comparison_table(
         season, predictors, BENCHMARK, first_gameweek=args.first_gameweek
     )
+    # The same models judged on ranking rather than selection. Kept separate
+    # because the two disagree, and that disagreement is the finding.
+    by_ranking = comparison_table(
+        season,
+        predictors,
+        BENCHMARK,
+        metric="rank_correlation",
+        first_gameweek=args.first_gameweek,
+    )
 
     lines = [
         "# Model results",
@@ -114,6 +123,15 @@ def main() -> int:
         "",
         to_markdown_table(against_benchmark.round(3)),
         "",
+        "## The same models, judged on ranking instead",
+        "",
+        "Ordering the whole field and choosing the best fifteen turn out to be "
+        "different skills, and the models that are good at one are not the ones "
+        "good at the other. Both tables are honest; they answer different "
+        "questions.",
+        "",
+        to_markdown_table(by_ranking.round(4)),
+        "",
         "## Reading these results",
         "",
         "- **Better ranking does not mean better picks.** The shortest form "
@@ -130,9 +148,19 @@ def main() -> int:
         "- **One season is not proof.** These numbers come from a single season of "
         "33 scored gameweeks. Treat a small gap between models as noise — the "
         "table above says which gaps qualify.",
+        "- **The component model is decisively the best at ranking and decisively "
+        "the most accurate, and it still does not pick a better fifteen.** It beats "
+        "the benchmark on rank correlation in every single gameweek, and on error "
+        "in every single gameweek, yet its top-15 return is a dead heat. The top of "
+        "a gameweek is dominated by hauls, and being right on average does not "
+        "predict who hauls.",
+        "- **Expected goals do earn their place** — the identical model using actual "
+        "goals ranks and errs measurably worse. That premise holds even though it "
+        "does not show up in the selection metric.",
         "- **Nothing here has earned its way into the UI yet.** Per `CLAUDE.md`, a "
         "model needs to beat the benchmark to be wired in, and beating it means "
-        "clearing the noise threshold, not merely topping the table.",
+        "clearing the noise threshold on the metric that decides something, not "
+        "merely topping the table.",
         "",
     ]
 
