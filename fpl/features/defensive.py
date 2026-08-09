@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from fpl.models.components import canonical_position
+from fpl.domain.positions import canonical_position
 
 CLEARANCES_BLOCKS_INTERCEPTIONS = "clearances_blocks_interceptions"
 TACKLES = "tackles"

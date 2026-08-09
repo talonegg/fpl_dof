@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from fpl.sources.snapshot import (
+from fpl.store.snapshot import (
     available_gameweeks,
     captured_dates,
     read_daily_signals,

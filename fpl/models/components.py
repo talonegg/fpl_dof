@@ -29,6 +29,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from fpl.domain.positions import canonical_position
 from fpl.models.base import empty_predictions
 
 MINUTES_PER_MATCH = 90
@@ -52,25 +53,7 @@ DEFENSIVE_CONTRIBUTION_THRESHOLD = {"DEF": 10, "MID": 12, "FWD": 12}
 
 FULL_APPEARANCE_MINUTES = 60
 
-# The archive is not consistent about how it spells positions -- goalkeepers
-# appear as both "GK" and "GKP", and fpl/domain/identity.py already knows this.
-# An unrecognised spelling does not fail loudly here, it silently zeroes the
-# clean-sheet term *and* the conceded penalty, so canonicalise before scoring.
-POSITION_ALIASES = {
-    "GKP": "GK",
-    "GOALKEEPER": "GK",
-    "DEFENDER": "DEF",
-    "MIDFIELDER": "MID",
-    "FORWARD": "FWD",
-}
-
-
-def canonical_position(position: object) -> object:
-    """Map a position spelling onto the one the scoring tables use."""
-    if not isinstance(position, str):
-        return position
-    upper = position.upper()
-    return POSITION_ALIASES.get(upper, upper)
+# Position spelling varies by source; the vocabulary lives in the domain layer.
 
 
 # Opponent adjustment is noisy off a handful of matches, so cap how far it can

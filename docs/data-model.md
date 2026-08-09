@@ -18,6 +18,98 @@ occasionally ambiguous. Any model spanning seasons inherits that seam.
 
 Everything below follows from those two.
 
+## The architecture
+
+Seven layers, each depending only on those below it. The rule is enforced by
+`tests/test_architecture.py` rather than described here and hoped for — it
+reads the imports and fails on any upward dependency.
+
+```mermaid
+flowchart TD
+    subgraph outside["Outside world"]
+        API["FPL API"]
+        ARCH["Community archive"]
+        ODDS["The Odds API"]
+    end
+
+    SOURCES["<b>sources</b><br/>fetch only, no football knowledge<br/><i>fpl_api · archive · odds · base</i>"]
+    DOMAIN["<b>domain</b><br/>types and pure transforms<br/><i>players · fixtures · positions · rules<br/>identity · teams · history · bps</i>"]
+    STORE["<b>store</b><br/>persist domain objects<br/><i>snapshot · cache</i>"]
+    FEATURES["<b>features</b><br/>derived metrics, via a catalogue<br/><i>registry · rates · availability<br/>advanced · penalties · market · defensive</i>"]
+    MODELS["<b>models</b><br/>expected points<br/><i>naive · minutes · components</i>"]
+    OPTIMISE["<b>optimise</b><br/>squad and transfers<br/><i>squad · transfers</i>"]
+    BACKTEST["<b>backtest</b><br/>evaluation<br/><i>harness · metrics · season · seasons</i>"]
+    APP["<b>app</b><br/>rendering only<br/><i>never imports streamlit into fpl/</i>"]
+
+    DATA[("data branch<br/>parquet")]
+
+    API --> SOURCES
+    ARCH --> SOURCES
+    ODDS --> SOURCES
+    SOURCES --> DOMAIN
+    DOMAIN --> STORE
+    DOMAIN --> FEATURES
+    STORE <--> DATA
+    FEATURES --> MODELS
+    DOMAIN --> MODELS
+    MODELS --> OPTIMISE
+    DOMAIN --> OPTIMISE
+    MODELS --> BACKTEST
+    OPTIMISE --> BACKTEST
+    FEATURES --> APP
+    OPTIMISE --> APP
+
+    classDef layer fill:#2a78d6,stroke:#1a5aa8,color:#fff
+    classDef ext fill:#eb6834,stroke:#c04d20,color:#fff
+    classDef persist fill:#1baf7a,stroke:#12805a,color:#fff
+    class SOURCES,DOMAIN,STORE,FEATURES,MODELS,OPTIMISE,BACKTEST,APP layer
+    class API,ARCH,ODDS ext
+    class DATA persist
+```
+
+### What each layer may not do
+
+| Layer | Rule | Why |
+|---|---|---|
+| `sources` | must not import `domain` | a fetcher returns bytes; it does not know what a player is |
+| `store` | persists domain objects, never fetches | separating these is what removed the old upward dependency |
+| `domain` | must not import `models` | domain types should be usable without dragging a predictor in |
+| `features` | one function per derivation, registered | so "where does this column come from" has an answer |
+| `fpl/*` | must not import `streamlit` | the prime directive; tested |
+| `app/*` | must not define derivations | arithmetic belongs in `features` |
+
+Two of these were violations until this review. `canonical_position` lived in
+`models/components.py`, so both `domain` and `features` imported *upwards* to
+ask what a goalkeeper was — it now lives in `domain/positions.py`. And
+`snapshot.py` sat in `sources` while fetching, transforming *and* writing,
+which forced `sources` to import `domain`; splitting the writing into `store`
+resolved it.
+
+### Derivations are a catalogue, not a chain
+
+Every derived column comes from a pure `frame -> frame` function. They were
+previously hand-chained at the call site:
+
+```python
+players = add_scouting_metrics(load_players(), load_schedule())
+return add_advanced_metrics(add_availability(players))
+```
+
+which is order-dependent, silently incomplete if one is forgotten, and gives
+no answer to "where does `expected_penalty_goals` come from". `features/registry.py`
+declares each derivation with what it requires and provides, so the whole set
+applies in one call:
+
+```python
+result = enrich(players, rates={"schedule": schedule})
+result.applied  # ['rates', 'availability', 'advanced', 'penalties']
+result.skipped  # {} live; the live-only ones on an archive frame
+```
+
+Skipping is the important part. Availability and set-piece duty **do not exist**
+for historical seasons, so applying the catalogue to an archive frame must
+produce fewer columns rather than raising — or worse, inventing values.
+
 ## What exists today
 
 ### Sources — data that arrives from outside
@@ -55,7 +147,7 @@ Everything below follows from those two.
 | Dataset | Where | Why it is not just a constant |
 |---|---|---|
 | FPL rules | `domain/rules.py` | budget, squad shape, hit cost — change between seasons |
-| position aliases | `models/components.py` | archive spells goalkeeper `GK` *and* `GKP` |
+| position aliases | `domain/positions.py` | archive spells goalkeeper `GK` *and* `GKP` |
 | team aliases | `domain/teams.py` | bookmakers say "Manchester United", FPL says "Man Utd" |
 | numeric-string columns | `domain/players.py` | the API sends numbers as JSON strings |
 | season capabilities | `backtest/seasons.py` | which seasons support which model |

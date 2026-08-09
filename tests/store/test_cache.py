@@ -11,7 +11,7 @@ import time
 import pandas as pd
 import pytest
 
-from fpl.sources import cache
+from fpl.store import cache
 
 DF = pd.DataFrame([{"player": "Saka", "points": 9}, {"player": "Isak", "points": 2}])
 

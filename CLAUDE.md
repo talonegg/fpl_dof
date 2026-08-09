@@ -20,9 +20,13 @@ streamlit_app.py        Entry point. Must stay at the repo root -- Streamlit put
                         makes `import fpl` work on Streamlit Cloud with no install.
 app/                    Streamlit UI only. Pages, widgets, layout, caching wrappers.
 fpl/
-  sources/              Fetching raw data (FPL API, historical archives, odds, etc.)
-  domain/               Types + pure transforms (players, fixtures, gameweeks)
-  features/             Feature engineering (form, fixture difficulty, minutes risk)
+  sources/              Fetching raw data. Must not import domain -- a fetcher
+                        returns bytes, it does not know what a player is.
+  domain/               Types + pure transforms (players, fixtures, positions,
+                        rules, identity). Must not import models.
+  store/                Persisting domain objects (snapshots, parquet cache).
+  features/             Derived metrics. Every derivation is a frame -> frame
+                        function registered in features/registry.py.
   models/               Expected-points predictors. Each implements the Predictor protocol.
   optimise/             MILP squad/transfer optimisation (PuLP + CBC)
   backtest/             Historical replay harness + evaluation metrics
@@ -107,6 +111,19 @@ team limits leak into a predictor.
 by the horizon and so churns on noise. See `docs/optimiser-results.md`. Before
 wiring transfer recommendations into the UI, run the season simulation with the
 predictor you intend to use — the answer is not the same for all of them.
+
+**The layering is tested, not just described.** `tests/test_architecture.py`
+reads the imports and fails on any upward dependency. Seven layers: sources,
+domain, store, features, models, optimise, backtest. Two violations existed
+before it was written -- position vocabulary living in `models/`, and
+`snapshot.py` fetching *and* writing from inside `sources/` -- so the test is
+load-bearing rather than decorative.
+
+**Add a derivation to the catalogue, not to a call site.** `features/registry.py`
+declares what each derivation requires and provides. `enrich()` applies the
+applicable ones and reports what it skipped, which is how live-only signals
+(availability, set-piece duty) correctly produce fewer columns on historical
+data instead of raising or inventing values.
 
 **FPL rules live in one place** — `fpl/domain/rules.py`. Budget 100.0, 15-player
 squad (2 GK / 5 DEF / 5 MID / 3 FWD), max 3 per club, valid starting XI formations,

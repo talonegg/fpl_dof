@@ -25,7 +25,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from fpl.models.components import canonical_position
+from fpl.domain.positions import canonical_position
 
 
 @dataclass(frozen=True)
