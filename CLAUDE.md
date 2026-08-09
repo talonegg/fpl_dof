@@ -71,6 +71,17 @@ fourth. Read the per-season table, not just the pooled mean, and weight
 2025-26 accordingly. A second current-rules season (2026-27) is what would
 settle it.
 
+**Never evaluate a live-only signal on historical data.** Injury status,
+`chance_of_playing_next_round` and betting odds are published only for *now* —
+nobody recorded who was injured in gameweek 12 of 2023-24. Running them over an
+archive season does not fail, it returns "everyone fit" and the signal silently
+contributes nothing, producing a backtest number that looks fine and means
+nothing. `fpl/features/availability.py` raises `AvailabilityUnavailable` rather
+than defaulting; keep that behaviour for any new live-only source. These signals
+earn their place through live use and forward testing, not backtests — which
+means the daily snapshots on the `data` branch are what will eventually make a
+real evaluation possible.
+
 **Model defensive contributions.** 2 points for clearing a threshold of defensive
 actions: 10 CBIT for defenders, 12 CBIRT for midfielders and forwards,
 goalkeepers ineligible. `ComponentPredictor` scores them and degrades to zero on

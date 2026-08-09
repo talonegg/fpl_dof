@@ -13,10 +13,12 @@ import pytest
 
 from fpl.features.availability import (
     SELECTABLE_THRESHOLD,
+    AvailabilityUnavailable,
     add_availability,
     availability,
     discount_expected_points,
     flagged,
+    has_availability_data,
     selectable,
 )
 
@@ -73,8 +75,20 @@ def test_availability_is_bounded_to_a_probability():
     assert availability(odd).iloc[0] == 1.0
 
 
-def test_missing_columns_do_not_raise():
-    assert availability(pd.DataFrame([{"web_name": "Bare"}])).iloc[0] == 1.0
+def test_data_without_availability_fields_is_refused_not_assumed_fit():
+    """Historical data has no status; "everyone fit" would be silently wrong."""
+    with pytest.raises(AvailabilityUnavailable, match="live-only signal"):
+        availability(pd.DataFrame([{"web_name": "Bare", "total_points": 5}]))
+
+
+def test_an_archive_season_is_recognised_as_carrying_no_availability():
+    archive_shaped = pd.DataFrame([{"element": 1, "gameweek": 5, "total_points": 6, "minutes": 90}])
+
+    assert not has_availability_data(archive_shaped)
+
+
+def test_a_live_frame_is_recognised_as_carrying_availability():
+    assert has_availability_data(PLAYERS)
 
 
 def test_availability_of_nothing_is_empty():
@@ -149,3 +163,13 @@ def test_availability_on_the_real_snapshot(bootstrap):
 
     assert result.between(0, 1).all()
     assert len(result) == len(players)
+
+
+def test_the_real_archive_carries_no_availability_data(archive):
+    """The guarantee this whole guard exists for, checked on real archive data."""
+    assert not has_availability_data(archive)
+
+
+def test_applying_availability_to_the_real_archive_is_refused(archive):
+    with pytest.raises(AvailabilityUnavailable):
+        availability(archive)

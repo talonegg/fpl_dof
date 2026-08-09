@@ -15,6 +15,17 @@ Status codes, from the API:
 
 ``a`` available · ``d`` doubtful · ``i`` injured · ``s`` suspended
 ``u`` unavailable (left the club, ineligible) · ``n`` not in squad
+
+**This is a live-only signal.** The historical archive carries no ``status``
+and no ``chance_of_playing_next_round``, because the API only ever publishes
+the current state — nobody recorded who was injured in gameweek 12 of 2023-24.
+So availability must never be evaluated on archive seasons: it is not that the
+answer would be uncertain, it is that every historical player would come back
+"fully fit" and the signal would silently contribute nothing.
+
+Rather than defaulting to fit, :func:`availability` raises when handed a frame
+with neither field. A backtest that quietly assumed everyone was available
+would produce a number that looks fine and means nothing.
 """
 
 from __future__ import annotations
@@ -39,6 +50,21 @@ STATUS_AVAILABILITY = {
 # API's own "expected to play" band, so anything under it carries real doubt.
 SELECTABLE_THRESHOLD = 0.75
 
+AVAILABILITY_COLUMNS = ("status", "chance_of_playing_next_round")
+
+
+class AvailabilityUnavailable(ValueError):
+    """The frame carries no availability data, so the question cannot be asked."""
+
+
+def has_availability_data(players: pd.DataFrame) -> bool:
+    """Whether this frame carries availability at all.
+
+    False for every archive season. Use it to decide whether an availability
+    signal applies, rather than applying it and getting silent ones back.
+    """
+    return any(column in players.columns for column in AVAILABILITY_COLUMNS)
+
 
 def availability(players: pd.DataFrame) -> pd.Series:
     """Probability each player features in the next gameweek, 0 to 1.
@@ -47,9 +73,20 @@ def availability(players: pd.DataFrame) -> pd.Series:
     falls back to ``status`` where it does not — never the other way round,
     because a null chance is an absence of news rather than a clean bill of
     health.
+
+    Raises :class:`AvailabilityUnavailable` on a frame carrying neither field,
+    which in practice means historical data. Returning "everyone is fit" there
+    would be a silent, plausible, wrong answer.
     """
     if players.empty:
         return pd.Series(dtype="float64")
+
+    if not has_availability_data(players):
+        raise AvailabilityUnavailable(
+            "this data carries no status or chance_of_playing_next_round — "
+            "availability is a live-only signal and was never recorded "
+            "historically, so it cannot be evaluated here"
+        )
 
     if "status" in players.columns:
         from_status = players["status"].map(STATUS_AVAILABILITY)
