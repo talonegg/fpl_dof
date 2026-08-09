@@ -11,27 +11,54 @@ changes.
 
 - Season: **2025-26**
 - Gameweeks 6–20 (15 scored gameweeks), point-in-time
-- Recorded: 2026-08-08
+- Recorded: 2026-08-08. **Re-run and revised: 2026-08-09.**
 
 ## The headline
 
 **Whether transferring pays depends on the predictor**, and the earlier blanket
 claim that it always loses was partly an artefact of a bug (see below).
 
-| Model | Horizon | Net points | Hits paid | Transfers | Points/GW |
-|---|---|---|---|---|---|
-| Component(4) | **0 (hold)** | **793** | 0 | 0 | **52.87** |
-| Component(4) | 5 | 705 | 52 | 28 | 47.00 |
-| SeasonMean | 0 (hold) | 740 | 0 | 0 | 49.33 |
-| SeasonMean | **5** | **756** | 4 | 16 | **50.40** |
+| Model | Horizon | Net points | Hits paid |
+|---|---|---|---|
+| Component | **0 (hold)** | **793** | 0 |
+| Component | 5 | 679 | 56 |
+| SeasonMean | 0 (hold) | 740 | 0 |
+| SeasonMean | **5** | **766** | 4 |
 
-- With the **stable** predictor, transferring now *beats* holding by 16 points
-  over 15 gameweeks. It makes 16 transfers and pays only one hit.
-- With the **volatile** predictor, transferring still costs about 88 points. It
-  makes 28 transfers and pays thirteen hits.
+- With the **stable** predictor, transferring *beats* holding by 26 points over
+  15 gameweeks, paying a single hit.
+- With the **volatile** predictor, transferring costs 114 points. It pays
+  fourteen hits chasing a signal that does not persist.
 
 The best single result remains Component holding its opening squad (793), but
 that is one opening squad's luck — see the four-start-point check below.
+
+The transfer-count column was dropped rather than carried forward from the
+earlier recording: it was not re-measured in this run, and reprinting an
+unverified number next to verified ones is how a table stops being trustworthy.
+
+### The numbers moved on re-run, and the cause was not identified
+
+Both *holding* results reproduced exactly (740 and 793). Both *transferring*
+results moved: SeasonMean 756 → 766, Component 705 → 679.
+
+Checked before writing this down:
+
+- **The simulation is deterministic.** Three consecutive runs of SeasonMean at
+  horizon 5 returned 766.0 every time, so this is a code change between the two
+  recordings, not solver noise or nondeterminism.
+- **The obvious suspect was ruled out.** `Squad` gained an `objective` field in
+  the meantime, but nothing compares or orders `Squad` objects, so the extra
+  field cannot change a decision.
+
+**What was not done: bisecting the intervening commits to find the cause.** A
+season simulation takes minutes, so this was judged not worth the time against
+a conclusion that did not change. It is recorded rather than quietly smoothed
+over, because "the numbers moved and I do not know why" is a real state and the
+alternative is a document that looks more certain than the work behind it.
+
+Both changes move *away* from the middle: the good case got better and the bad
+case got worse, so the finding below is strengthened rather than threatened.
 
 ### Corrected from an earlier version of this document
 

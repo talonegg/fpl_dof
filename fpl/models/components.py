@@ -29,6 +29,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from fpl.domain.positions import canonical_position
 from fpl.models.base import empty_predictions
 
 MINUTES_PER_MATCH = 90
@@ -52,25 +53,7 @@ DEFENSIVE_CONTRIBUTION_THRESHOLD = {"DEF": 10, "MID": 12, "FWD": 12}
 
 FULL_APPEARANCE_MINUTES = 60
 
-# The archive is not consistent about how it spells positions -- goalkeepers
-# appear as both "GK" and "GKP", and fpl/domain/identity.py already knows this.
-# An unrecognised spelling does not fail loudly here, it silently zeroes the
-# clean-sheet term *and* the conceded penalty, so canonicalise before scoring.
-POSITION_ALIASES = {
-    "GKP": "GK",
-    "GOALKEEPER": "GK",
-    "DEFENDER": "DEF",
-    "MIDFIELDER": "MID",
-    "FORWARD": "FWD",
-}
-
-
-def canonical_position(position: object) -> object:
-    """Map a position spelling onto the one the scoring tables use."""
-    if not isinstance(position, str):
-        return position
-    upper = position.upper()
-    return POSITION_ALIASES.get(upper, upper)
+# Position spelling varies by source; the vocabulary lives in the domain layer.
 
 
 # Opponent adjustment is noisy off a handful of matches, so cap how far it can
@@ -96,10 +79,16 @@ class ComponentPredictor:
 
     minutes_window: int = DEFAULT_MINUTES_WINDOW
     use_expected_goals: bool = True
+    # Optional: a dedicated minutes forecaster. Minutes are the one input with
+    # complete data, so they are worth predicting properly rather than with a
+    # trailing mean buried in here. None keeps the original behaviour.
+    minutes_forecaster: object | None = None
 
     @property
     def name(self) -> str:
         suffix = "" if self.use_expected_goals else ", actuals"
+        if self.minutes_forecaster is not None:
+            suffix += f", {self.minutes_forecaster.name}"
         return f"Component({self.minutes_window}{suffix})"
 
     # -- component rates, all derived from history only ---------------------
@@ -166,6 +155,20 @@ class ComponentPredictor:
 
     def _expected_minutes(self, history: pd.DataFrame) -> pd.DataFrame:
         """Recent minutes, plus how often the player lasted a full appearance."""
+        if self.minutes_forecaster is not None:
+            forecast = self.minutes_forecaster.forecast(history, gameweek=0)
+            if not forecast.empty:
+                return forecast.rename(
+                    columns={
+                        "expected_minutes": "expected_minutes",
+                        "start_probability": "full_appearance_rate",
+                    }
+                ).assign(
+                    any_appearance_rate=lambda frame: frame["full_appearance_rate"].clip(
+                        lower=0.0, upper=1.0
+                    )
+                )[["element", "expected_minutes", "full_appearance_rate", "any_appearance_rate"]]
+
         recent = (
             history.sort_values("gameweek")
             .groupby("element", as_index=False)

@@ -64,6 +64,32 @@ DAILY_SIGNAL_COLUMNS = (
     "transfers_out_event",
     # Cheap context for interpreting the above.
     "form",
+    # Defensive contribution inputs. Kept alongside the published total so the
+    # threshold stays recomputable if the rule changes, and so the identity
+    # between them can be checked rather than assumed.
+    "clearances_blocks_interceptions",
+    "tackles",
+    "recoveries",
+    "defensive_contribution",
+    "bps",
+    # The remaining observable BPS inputs, as season-to-date totals. Captured
+    # daily so per-gameweek values can be recovered by differencing, which
+    # makes the project self-sufficient rather than dependent on a third-party
+    # archive continuing to be maintained. Costs about 5MB a season.
+    "goals_scored",
+    "assists",
+    "clean_sheets",
+    "goals_conceded",
+    "own_goals",
+    "penalties_saved",
+    "penalties_missed",
+    "yellow_cards",
+    "red_cards",
+    "saves",
+    "bonus",
+    "starts",
+    "expected_goals",
+    "expected_assists",
     "total_points",
     "minutes",
 )

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from dataclasses import dataclass
 
 import pandas as pd
 
@@ -95,6 +96,97 @@ def match_to_current_players(
 
     merged = keyed_archive.merge(keys[["match_key", "current_element"]], on="match_key", how="left")
     return merged
+
+
+@dataclass
+class SeasonMatch:
+    """A mapping of players between two seasons, and what it could not map."""
+
+    pairs: pd.DataFrame
+    unmatched_left: list[str]
+    unmatched_right: list[str]
+    ambiguous: list[str]
+
+    @property
+    def matched(self) -> int:
+        return len(self.pairs)
+
+    @property
+    def coverage(self) -> float:
+        """Share of the left season's players that found a counterpart."""
+        total = self.matched + len(self.unmatched_left)
+        return self.matched / total if total else 0.0
+
+    def summary(self) -> str:
+        return (
+            f"{self.matched} matched ({self.coverage:.0%}), "
+            f"{len(self.unmatched_left)} unmatched, {len(self.ambiguous)} ambiguous"
+        )
+
+
+def match_across_seasons(
+    left: pd.DataFrame,
+    right: pd.DataFrame,
+    name_column: str = "player_name",
+    left_id: str = "element",
+    right_id: str = "element",
+) -> SeasonMatch:
+    """Map players between any two seasons by normalised name.
+
+    ``element`` ids are reassigned every season, so a player in 2023-24 and the
+    same player in 2024-25 share nothing but their name. This is the general
+    form of :func:`match_to_current_players`, which only ever maps onto the
+    live player list.
+
+    Names that appear more than once on *either* side are reported as
+    ``ambiguous`` and excluded from ``pairs``. Two players called Danny Ward
+    cannot be told apart, and picking one attributes a season of history to the
+    wrong person -- a gap is recoverable, a wrong join is not.
+    """
+    left_keys = _unique_keys(left, name_column, left_id, "left")
+    right_keys = _unique_keys(right, name_column, right_id, "right")
+
+    ambiguous = sorted(set(left_keys.ambiguous) | set(right_keys.ambiguous))
+
+    pairs = left_keys.frame.merge(right_keys.frame, on="match_key", how="inner")
+    pairs = pairs[["match_key", "name_left", "left", "name_right", "right"]]
+
+    matched_left = set(pairs["left"])
+    matched_right = set(pairs["right"])
+
+    return SeasonMatch(
+        pairs=pairs.reset_index(drop=True),
+        unmatched_left=sorted(
+            left_keys.frame.loc[~left_keys.frame["left"].isin(matched_left), "name_left"]
+            .dropna()
+            .unique()
+            .tolist()
+        ),
+        unmatched_right=sorted(
+            right_keys.frame.loc[~right_keys.frame["right"].isin(matched_right), "name_right"]
+            .dropna()
+            .unique()
+            .tolist()
+        ),
+        ambiguous=ambiguous,
+    )
+
+
+@dataclass
+class _Keyed:
+    frame: pd.DataFrame
+    ambiguous: list[str]
+
+
+def _unique_keys(players: pd.DataFrame, name_column: str, id_column: str, side: str) -> _Keyed:
+    """One row per unambiguous player, keyed for matching."""
+    keyed = add_match_key(players[[name_column, id_column]].drop_duplicates(), name_column)
+    keyed = keyed[keyed["match_key"].notna()]
+    keyed = keyed.rename(columns={name_column: f"name_{side}", id_column: side})
+
+    duplicated = keyed["match_key"].duplicated(keep=False)
+    ambiguous = sorted(keyed.loc[duplicated, f"name_{side}"].dropna().unique().tolist())
+    return _Keyed(frame=keyed[~duplicated], ambiguous=ambiguous)
 
 
 def ambiguous_names(players: pd.DataFrame) -> list[str]:

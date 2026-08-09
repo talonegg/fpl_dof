@@ -79,3 +79,18 @@ Ordering the whole field and choosing the best fifteen turn out to be different 
 - **The component model is decisively the best at ranking and decisively the most accurate, and it still does not pick a better fifteen.** It beats the benchmark on rank correlation in every single gameweek, and on error in every single gameweek, yet its top-15 return is a dead heat. The top of a gameweek is dominated by hauls, and being right on average does not predict who hauls.
 - **Expected goals do earn their place** — the identical model using actual goals ranks and errs measurably worse. That premise holds even though it does not show up in the selection metric.
 - **Nothing here has earned its way into the UI yet.** Per `CLAUDE.md`, a model needs to beat the benchmark to be wired in, and beating it means clearing the noise threshold on the metric that decides something, not merely topping the table.
+
+## Scope of this document
+
+Single-season, in-season prediction only. Two later documents supersede parts
+of it and should be read first:
+
+- **`docs/multi-season-results.md`** — the same models over four seasons. It
+  reverses this document's 2025-26 conclusion about the component model: what
+  looked indistinguishable from the benchmark here is significantly *worse*
+  pooled. One season had the sign wrong.
+- **`docs/season-opening-squad.md`** — prediction *before* a season starts,
+  which is a different problem with a different answer.
+
+Regenerate with `python scripts/backtest.py`; prefer
+`scripts/backtest_seasons.py`, which is the authority.
