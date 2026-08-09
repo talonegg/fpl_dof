@@ -6,6 +6,7 @@ locally and on Streamlit Community Cloud without an editable install.
 """
 
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import streamlit as st
@@ -51,8 +52,6 @@ with players_tab:
 
 with scouting_tab:
     st.caption(filters_view.caption(player_filter, len(filtered_players), len(players)))
-    scouting_view.render_availability(filtered_players)
-    st.divider()
     history = load_archive_history()
     scouting_view.render_detail(filtered_players, history, season_label=ARCHIVE_SEASON)
     st.divider()
@@ -98,3 +97,12 @@ with st.sidebar:
             width="stretch",
             hide_index=True,
         )
+
+# Below the tabs, so it is on every page: the availability table is what you
+# check when a filter has hidden someone, and it is reference rather than
+# analysis. It honours club/position/price but not the availability band --
+# filtering it by that control would empty it precisely when it is needed.
+st.divider()
+scouting_view.render_availability(
+    apply_filter(players, replace(player_filter, availability_bands=None))
+)

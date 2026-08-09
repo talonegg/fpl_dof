@@ -8,17 +8,28 @@ round marks long-term absentees as fully available — and on live data that is
 
 from __future__ import annotations
 
+from datetime import date
+
 import pandas as pd
 import pytest
 
 from fpl.features.availability import (
+    AVAILABILITY_BANDS,
+    RETURN_DEPARTED,
+    RETURN_KNOWN,
+    RETURN_NOT_APPLICABLE,
+    RETURN_UNKNOWN,
     SELECTABLE_THRESHOLD,
     AvailabilityUnavailable,
     add_availability,
+    add_return_dates,
     availability,
+    availability_band,
     discount_expected_points,
     flagged,
     has_availability_data,
+    parse_return_date,
+    return_status,
     selectable,
 )
 
@@ -173,3 +184,121 @@ def test_the_real_archive_carries_no_availability_data(archive):
 def test_applying_availability_to_the_real_archive_is_refused(archive):
     with pytest.raises(AvailabilityUnavailable):
         availability(archive)
+
+
+# --- Return dates, parsed out of the news prose ---
+
+NEWS = pd.DataFrame(
+    [
+        {"web_name": "Dated", "status": "i", "news": "Groin injury - Expected back 21 Aug"},
+        {"web_name": "Unknown", "status": "i", "news": "Knee injury - Unknown return date"},
+        {"web_name": "Banned", "status": "s", "news": "Suspended until 29 Aug"},
+        {"web_name": "Chance", "status": "d", "news": "Knee injury - 75% chance of playing"},
+        {"web_name": "Loaned", "status": "u", "news": "Has joined Leicester City on loan"},
+        {"web_name": "Gone", "status": "u", "news": "has departed the club as a free agent."},
+        {"web_name": "Fine", "status": "a", "news": ""},
+    ]
+)
+
+
+def test_an_expected_back_date_is_extracted():
+    assert parse_return_date("Groin injury - Expected back 21 Aug", date(2026, 8, 9)) == date(
+        2026, 8, 21
+    )
+
+
+def test_a_suspension_end_date_is_extracted():
+    assert parse_return_date("Suspended until 29 Aug", date(2026, 8, 9)) == date(2026, 8, 29)
+
+
+def test_a_date_earlier_in_the_year_than_the_news_rolls_forward():
+    """The API publishes no year; a January date in December means next year."""
+    assert parse_return_date("Expected back 6 Jan", date(2026, 12, 20)) == date(2027, 1, 6)
+
+
+def test_an_unknown_return_date_yields_no_date():
+    assert parse_return_date("Knee injury - Unknown return date", date(2026, 8, 9)) is None
+
+
+def test_a_percentage_chance_is_not_a_date():
+    assert parse_return_date("Knee injury - 75% chance of playing", date(2026, 8, 9)) is None
+
+
+def test_news_without_a_date_yields_nothing():
+    assert parse_return_date("", date(2026, 8, 9)) is None
+    assert parse_return_date(None, date(2026, 8, 9)) is None
+
+
+def test_an_impossible_date_is_rejected_rather_than_raising():
+    assert parse_return_date("Expected back 30 Feb", date(2026, 8, 9)) is None
+
+
+def test_return_status_distinguishes_unknown_from_departed():
+    """Out indefinitely and gone for good are not the same problem."""
+    assert return_status("Knee injury - Unknown return date") == RETURN_UNKNOWN
+    assert return_status("Has joined Leicester City on loan") == RETURN_DEPARTED
+    assert return_status("Groin injury - Expected back 21 Aug") == RETURN_KNOWN
+
+
+def test_a_player_with_no_news_needs_no_return():
+    assert return_status("") == RETURN_NOT_APPLICABLE
+
+
+def test_add_return_dates_labels_every_row():
+    result = add_return_dates(NEWS)
+
+    assert result["return_status"].tolist() == [
+        RETURN_KNOWN,
+        RETURN_UNKNOWN,
+        RETURN_KNOWN,
+        "No date given",
+        RETURN_DEPARTED,
+        RETURN_DEPARTED,
+        RETURN_NOT_APPLICABLE,
+    ]
+
+
+def test_unknown_return_dates_are_identifiable_as_missing():
+    result = add_return_dates(NEWS)
+
+    assert pd.isna(result.loc[1, "return_date"])
+    assert result.loc[1, "return_status"] == RETURN_UNKNOWN
+
+
+def test_a_frame_without_news_still_gets_the_columns():
+    result = add_return_dates(pd.DataFrame([{"web_name": "Bare", "status": "a"}]))
+
+    assert "return_date" in result.columns
+    assert result.loc[0, "return_status"] == RETURN_NOT_APPLICABLE
+
+
+# --- Bands, for the sidebar filter ---
+
+
+def test_bands_split_available_doubtful_and_unavailable():
+    result = availability_band(PLAYERS)
+
+    assert result.tolist() == [
+        "Available",
+        "Unavailable",
+        "Doubtful",
+        "Available",
+        "Unavailable",
+        "Unavailable",
+    ]
+
+
+def test_the_bands_are_offered_best_first():
+    assert AVAILABILITY_BANDS[0] == "Available"
+    assert AVAILABILITY_BANDS[-1] == "Unavailable"
+
+
+def test_return_dates_on_the_real_snapshot(bootstrap):
+    from fpl.domain.players import build_players_frame
+
+    players = build_players_frame(bootstrap)
+
+    result = add_return_dates(flagged(players))
+
+    assert result["return_status"].notna().all()
+    assert (result["return_status"] != "").all()

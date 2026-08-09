@@ -30,10 +30,48 @@ would produce a number that looks fine and means nothing.
 
 from __future__ import annotations
 
+import re
+from datetime import date, datetime
+
 import pandas as pd
 
 AVAILABLE = "a"
 DOUBTFUL = "d"
+
+# The API publishes no structured return date -- it is prose inside `news`.
+# Two phrasings carry one, and a third says explicitly that none is known:
+#   "Groin injury - Expected back 21 Aug"
+#   "Suspended until 29 Aug"
+#   "Knee injury - Unknown return date"
+RETURN_DATE_PATTERN = re.compile(
+    r"(?:expected back|suspended until)\s+(\d{1,2})\s+([A-Za-z]{3,})", re.IGNORECASE
+)
+UNKNOWN_RETURN_PATTERN = re.compile(r"unknown return date", re.IGNORECASE)
+# "Has joined X on loan", "has departed the club", "has returned to Y".
+DEPARTED_PATTERN = re.compile(r"joined .+ on loan|departed the club|has returned to", re.IGNORECASE)
+
+MONTHS = {
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+
+# How to describe why a return date is or is not known. Kept as data so the UI
+# can group on it rather than re-parsing prose.
+RETURN_KNOWN = "Expected back"
+RETURN_UNKNOWN = "Unknown return date"
+RETURN_DEPARTED = "Left the club"
+RETURN_NOT_APPLICABLE = "No return needed"
+RETURN_UNSTATED = "No date given"
 
 # What each status implies when no percentage is published. A doubtful player
 # with no number attached is a genuine coin-toss; the rest are definite.
@@ -133,6 +171,107 @@ def discount_expected_points(pool: pd.DataFrame, column: str = "expected_points"
     df = pool.copy()
     if column in df.columns:
         df[column] = df[column] * availability(df)
+    return df
+
+
+AVAILABLE_BAND = "Available"
+DOUBTFUL_BAND = "Doubtful"
+UNAVAILABLE_BAND = "Unavailable"
+
+# Ordered best to worst, which is the order the filter should offer them in.
+AVAILABILITY_BANDS = (AVAILABLE_BAND, DOUBTFUL_BAND, UNAVAILABLE_BAND)
+
+
+def availability_band(players: pd.DataFrame) -> pd.Series:
+    """Bucket each player into available, doubtful or unavailable.
+
+    Three bands rather than a continuous number because that is how the
+    decision is actually made: buy, watch, or ignore.
+    """
+    if players.empty:
+        return pd.Series(dtype="object")
+
+    chance = availability(players)
+    return pd.Series(
+        pd.cut(
+            chance,
+            bins=[-0.01, 0.0, SELECTABLE_THRESHOLD - 0.001, 1.0],
+            labels=[UNAVAILABLE_BAND, DOUBTFUL_BAND, AVAILABLE_BAND],
+        ),
+        index=players.index,
+    ).astype(str)
+
+
+def parse_return_date(news: object, anchor: date | None = None) -> date | None:
+    """Pull an expected return date out of a news string.
+
+    The API writes dates without a year ("Expected back 21 Aug"), so the year
+    has to be inferred: take the next occurrence on or after ``anchor``, which
+    should be the date the news was published. Anchoring on *today* instead
+    would push a stale January note into next year.
+    """
+    if not isinstance(news, str) or not news.strip():
+        return None
+
+    match = RETURN_DATE_PATTERN.search(news)
+    if not match:
+        return None
+
+    day = int(match.group(1))
+    month = MONTHS.get(match.group(2)[:3].lower())
+    if month is None:
+        return None
+
+    anchor = anchor or datetime.now().date()
+    for year in (anchor.year, anchor.year + 1):
+        try:
+            candidate = date(year, month, day)
+        except ValueError:
+            return None  # 30 Feb and similar
+        if candidate >= anchor:
+            return candidate
+    return None
+
+
+def return_status(news: object) -> str:
+    """Why a return date is or is not known, as a groupable label."""
+    if not isinstance(news, str) or not news.strip():
+        return RETURN_NOT_APPLICABLE
+    if DEPARTED_PATTERN.search(news):
+        return RETURN_DEPARTED
+    if RETURN_DATE_PATTERN.search(news):
+        return RETURN_KNOWN
+    if UNKNOWN_RETURN_PATTERN.search(news):
+        return RETURN_UNKNOWN
+    return RETURN_UNSTATED
+
+
+def add_return_dates(players: pd.DataFrame) -> pd.DataFrame:
+    """Add ``return_date`` and ``return_status`` columns.
+
+    ``return_date`` is NaT wherever no date is published, which is most of the
+    time — ``return_status`` is what distinguishes "we know they are out but
+    not until when" from "they have left the club", and those should never be
+    read as the same thing.
+    """
+    df = players.copy()
+    if "news" not in df.columns:
+        df["return_date"] = pd.NaT
+        df["return_status"] = RETURN_NOT_APPLICABLE
+        return df
+
+    anchors = (
+        pd.to_datetime(df["news_added"], errors="coerce", utc=True).dt.date
+        if "news_added" in df.columns
+        else pd.Series([None] * len(df), index=df.index)
+    )
+    df["return_date"] = pd.to_datetime(
+        [
+            parse_return_date(news, anchor if isinstance(anchor, date) else None)
+            for news, anchor in zip(df["news"], anchors, strict=True)
+        ]
+    )
+    df["return_status"] = df["news"].map(return_status)
     return df
 
 

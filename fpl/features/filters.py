@@ -26,11 +26,12 @@ class PlayerFilter:
     positions: tuple[str, ...] | None = None
     teams: tuple[str, ...] | None = None
     price_range: tuple[float, float] | None = None
+    availability_bands: tuple[str, ...] | None = None
 
     @property
     def is_empty(self) -> bool:
         """Whether this filter can only ever match nothing."""
-        return self.positions == () or self.teams == ()
+        return () in (self.positions, self.teams, self.availability_bands)
 
     def describe(self) -> str:
         """A short human-readable summary, for showing on pages the filter affects."""
@@ -42,6 +43,8 @@ class PlayerFilter:
         if self.price_range is not None:
             low, high = self.price_range
             parts.append(f"£{low:.1f}m–£{high:.1f}m")
+        if self.availability_bands is not None:
+            parts.append(", ".join(self.availability_bands).lower())
         return ", ".join(parts) if parts else "no filters"
 
 
@@ -61,6 +64,16 @@ def apply_filter(players: pd.DataFrame, player_filter: PlayerFilter) -> pd.DataF
     if player_filter.price_range is not None and "price" in players.columns:
         low, high = player_filter.price_range
         mask &= players["price"].between(low, high)
+
+    if player_filter.availability_bands is not None:
+        # Availability is live-only, so a frame without it simply cannot be
+        # filtered on it. Skipping is right here; raising would break every
+        # historical view for the sake of a control that does not apply.
+        from fpl.features.availability import availability_band, has_availability_data
+
+        if has_availability_data(players):
+            bands = availability_band(players)
+            mask &= bands.isin(list(player_filter.availability_bands))
 
     return players[mask]
 
