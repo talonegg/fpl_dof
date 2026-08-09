@@ -601,6 +601,46 @@ can rule a model out but cannot establish one, and that remains true. The
 result is permission to use the minutes-scaled model, not evidence that it is
 skilful.
 
+## 10b. The shortlist, and why the ranking barely means anything
+
+The app's **Season opener** tab returns the twenty best squads rather than the
+best one, enumerated by no-good cuts (`fpl/optimise/ranking.py`): solve, forbid
+that exact combination of fifteen, solve again. Each solve is provably optimal
+for a slightly smaller problem, so entry twenty is genuinely the twentieth-best
+squad and not a perturbation of the first.
+
+Run against the real pool, the result argues for itself:
+
+| rank | score | XI points | gap | cost | formation |
+|---|---|---|---|---|---|
+| 1 | 405.39 | 396.64 | 0.00 | £100.0m | 4-4-2 |
+| 2 | 405.38 | 397.51 | 0.00 | £100.0m | 3-5-2 |
+| 3 | 405.37 | 396.64 | 0.02 | £100.0m | 4-4-2 |
+| … | | | | | |
+| 20 | 404.82 | — | 0.57 | £100.0m | — |
+
+**The twenty squads span 0.57 points out of 405 — 0.14%.** The prediction behind
+them is not accurate to a tenth of a percent and nothing suggests it is, so the
+ordering is entirely inside the model's own error. Presenting the top squad
+alone would imply a precision that does not exist. The tab therefore leads with
+that fact before showing the table, and offers the view that survives it: which
+*players* the twenty squads disagree about (Mbeumo enters eleven of the
+nineteen alternatives). That is a real decision; "rank 3 versus rank 7" is not.
+
+### One bug worth recording, because only real data found it
+
+The shortlist first came back apparently mis-sorted — rank 2 showing 397.5
+points against rank 1's 396.6, with a negative gap. The ranking was correct; the
+*displayed number* was not the ranked one. The optimiser maximises
+`starting XI + captain + bench_weight × bench`, while `Squad.expected_points`
+reported only `starting XI + captain`. A squad with a stronger bench can win the
+optimisation while showing fewer starting-XI points.
+
+`Squad.objective` now carries the maximised value explicitly, the ranking orders
+by it, and both numbers are shown. The synthetic test pool never caught this
+because its points were too uniform for the bench term to break a tie — a
+reminder that a passing unit test says the code runs, not that it is right.
+
 ## 11. Recommendation
 
 Build **stages 1, 2 and 6** first — cross-season rates, team strength, and the

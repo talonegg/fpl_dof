@@ -326,3 +326,20 @@ def test_the_availability_table_still_honours_the_club_filter(
 
     assert not at.exception
     assert "Availability" in [header.value for header in at.subheader]
+
+
+def test_the_season_opener_tab_is_present(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    assert "Season opener" in [tab.label for tab in at.tabs]
+
+
+def test_the_season_opener_renders_without_reaching_the_network(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    """Every fetch it needs is already patched; this fails loudly if that changes."""
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    assert not at.exception

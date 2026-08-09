@@ -166,6 +166,23 @@ opponents count.
 rebuilt the squad. Compare shares of each horizon's *own* ceiling; raw points
 across horizons are not comparable.
 
+**Recommend twenty squads, not one.** `fpl/optimise/ranking.py` enumerates the
+true ranked top N by **no-good cuts** — solve, forbid that exact combination of
+fifteen, solve again — so entry twenty is the twentieth-best squad rather than
+a perturbation. Excluding the *players* of each squad found instead would skip
+thousands of better squads, because the second-best squad usually shares
+thirteen or fourteen players with the best. The shortlist exists because the
+spread between first and twentieth is typically inside the prediction's error:
+showing one squad reads as an answer, showing twenty reads as the set of
+near-equivalent options it actually is. The "Season opener" tab says which of
+those two it is before showing the table.
+
+**A squad-shaped tab honours no filter, and says so.** A squad must be legal —
+fifteen players, two goalkeepers, at most three per club — so it cannot be
+drawn from a pool narrowed to a few clubs or one position. That is a third tab
+shape alongside player-shaped and team-shaped; `tests/test_views.py` encodes
+which tabs may ignore filters, so a new one cannot quietly opt out.
+
 **Expected points and optimisation stay separate.** The predictor answers "how many
 points will this player score in GW N". The optimiser answers "given those numbers
 and the FPL rules, what is the best squad". Never let a heuristic about budget or

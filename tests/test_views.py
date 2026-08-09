@@ -101,9 +101,16 @@ def test_a_view_honouring_everything_ignores_nothing():
     assert View(name="All", render=noop).ignored_filters == ()
 
 
-def test_the_club_filter_reaches_every_registered_view():
-    """Club is the one filter that means something for both shapes of data."""
+def test_the_club_filter_reaches_every_player_and_team_shaped_view():
+    """Club means something for player-shaped and team-shaped data alike.
+
+    Squad-shaped views are the exception and must say so: a squad has to be
+    legal — fifteen players, two goalkeepers, at most three per club — so it
+    cannot be drawn from a pool the user has narrowed to a few teams.
+    """
     for view in build_registry():
+        if "squad-shaped" in view.note:
+            continue
         assert view.honours_club, f"{view.name} does not honour the club filter"
 
 
@@ -113,14 +120,22 @@ def test_every_view_that_ignores_a_filter_explains_itself():
             assert view.note, f"{view.name} ignores filters without a note"
 
 
-def test_the_fixtures_view_is_the_only_team_shaped_one():
+def test_only_the_declared_shapes_ignore_filters():
+    """Every tab either consumes the global filters or is one of two known shapes."""
     ignoring = {view.name for view in build_registry() if view.ignored_filters}
 
-    assert ignoring == {"Fixtures"}
+    assert ignoring == {"Fixtures", "Season opener"}
+
+
+def test_a_squad_shaped_view_honours_no_filter_at_all():
+    """Half-applying them would answer a different question than the one asked."""
+    opener = next(view for view in build_registry() if view.name == "Season opener")
+
+    assert opener.ignored_filters == ("club", "position", "price", "availability")
 
 
 def test_the_registry_has_the_expected_tabs():
-    assert build_registry().names() == ["Players", "Scouting", "Fixtures"]
+    assert build_registry().names() == ["Players", "Scouting", "Fixtures", "Season opener"]
 
 
 def test_a_duplicate_view_name_is_rejected():

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from app import filters_view, fixtures_view, players_view, scouting_view
+from app import data, filters_view, fixtures_view, players_view, preseason_view, scouting_view
 from app.views import Registry, View, ViewContext
 
 
@@ -40,6 +40,17 @@ def _render_fixtures(context: ViewContext) -> None:
     fixtures_view.render(schedule, from_gameweek=gameweek)
 
 
+def _render_preseason(context: ViewContext) -> None:
+    prior = dict(data.load_prior_seasons())
+    failures = tuple(prior.pop("__failures__", []))
+    preseason_view.render(
+        pool=data.load_preseason_pool(),
+        target_season=data.UPCOMING_SEASON,
+        prior_seasons=prior,
+        failures=failures,
+    )
+
+
 def build_registry() -> Registry:
     """The tabs, in the order they appear."""
     registry = Registry()
@@ -68,6 +79,23 @@ def build_registry() -> Registry:
             honours_price=False,
             honours_availability=False,
             note="team-shaped: only the club filter applies",
+        )
+    )
+
+    registry.add(
+        View(
+            name="Season opener",
+            render=_render_preseason,
+            # A squad must be legal: two goalkeepers, five defenders, fifteen
+            # players from at least five clubs. Drawing it from a pool the user
+            # has filtered down would return an illegal squad or none at all,
+            # and silently answering a different question than the one asked is
+            # worse than declining the filter outright.
+            honours_club=False,
+            honours_position=False,
+            honours_price=False,
+            honours_availability=False,
+            note="squad-shaped: built from the whole market, so no filter applies",
         )
     )
 
