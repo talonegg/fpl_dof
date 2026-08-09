@@ -51,6 +51,8 @@ with players_tab:
 
 with scouting_tab:
     st.caption(filters_view.caption(player_filter, len(filtered_players), len(players)))
+    scouting_view.render_availability(filtered_players)
+    st.divider()
     history = load_archive_history()
     scouting_view.render_detail(filtered_players, history, season_label=ARCHIVE_SEASON)
     st.divider()
@@ -80,8 +82,11 @@ with st.sidebar:
         format_func=lambda value: labels[value],
         key="watchlist_select",
     )
+    # Compare as sets: the widget hands codes back in element order while the
+    # stored list is sorted, so a list comparison differs on the first render
+    # of every session and rewrites the file the user never touched.
     codes = players[players["element"].isin(chosen)]["code"].tolist()
-    if codes != st.session_state.watchlist:
+    if set(codes) != set(st.session_state.watchlist):
         st.session_state.watchlist = codes
         watchlist.save(WATCHLIST_PATH, codes)
 

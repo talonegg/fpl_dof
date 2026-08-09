@@ -110,10 +110,7 @@ Only now, once you have a backtest that can tell you whether a new signal helps.
   set-piece duties.
 - **Press/injury news**: FPL API's own `news` and `chance_of_playing_next_round`
   first — it is more reliable than scraping.
-- **Pundits/social**: YouTube Data API + transcripts, RSS from FPL blogs, then
-  LLM extraction into structured `(player, sentiment, claim, source, date)` rows.
-  Surface as an opinion panel in the scouting UI. Only enters the model if a
-  backtest earns it.
+- ~~**Pundits/social**~~ — **deferred to the backlog.** See below.
 
 Each source is a module implementing a common `Source` protocol with its own
 rate limiter and cache TTL, so a failing source degrades the app rather than
@@ -152,6 +149,30 @@ concurrent writes or per-user state.
 Face Spaces are the fallbacks if you outgrow it.
 
 ---
+
+## Backlog
+
+Things worth doing eventually, deliberately not scheduled.
+
+### Pundit and social sentiment
+
+YouTube Data API + transcripts, RSS from FPL blogs, LLM extraction into
+structured `(player, sentiment, claim, source, date)` rows, surfaced as an
+opinion panel.
+
+Deferred because it is the weakest signal in Phase 5 and the most expensive to
+build: it needs an extraction pipeline, an API key, and ongoing prompt
+maintenance, and it is *live-only*, so it can never be justified by a backtest
+the way `CLAUDE.md` requires. Everything cheaper has been done first.
+
+If it is picked up: it stays an opinion panel attributed to its source, and it
+does not enter the expected-points model.
+
+### Set-piece and price-change history
+
+`fpl/sources/snapshot.py` now records these daily. Once a season of captures
+exists, "does a change in penalty duty move points" becomes answerable —
+which is the only route to evaluating any live-only signal.
 
 ## The trap to avoid
 

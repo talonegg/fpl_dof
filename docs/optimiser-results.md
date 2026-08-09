@@ -15,25 +15,41 @@ changes.
 
 ## The headline
 
-**The transfer planner loses points.** Holding the opening squad beats every
-transfer strategy tried, for both models.
+**Whether transferring pays depends on the predictor**, and the earlier blanket
+claim that it always loses was partly an artefact of a bug (see below).
 
 | Model | Horizon | Net points | Hits paid | Transfers | Points/GW |
 |---|---|---|---|---|---|
 | Component(4) | **0 (hold)** | **793** | 0 | 0 | **52.87** |
-| Component(4) | 3 | 697 | 44 | 26 | 46.47 |
-| Component(4) | 5 | 704 | 56 | 29 | 46.93 |
-| Component(4) | 8 | 665 | 80 | 35 | 44.33 |
-| SeasonMean | **0 (hold)** | **740** | 0 | 0 | **49.33** |
-| SeasonMean | 3 | 721 | 4 | 16 | 48.07 |
-| SeasonMean | 5 | 742 | 8 | 17 | 49.47 |
-| SeasonMean | 8 | 738 | 16 | 19 | 49.20 |
+| Component(4) | 5 | 705 | 52 | 28 | 47.00 |
+| SeasonMean | 0 (hold) | 740 | 0 | 0 | 49.33 |
+| SeasonMean | **5** | **756** | 4 | 16 | **50.40** |
 
-Transferring costs the component model roughly **90–130 points over 15
-gameweeks**. For the season mean it is roughly break-even, and notably it makes
-far fewer transfers — 17 against 29.
+- With the **stable** predictor, transferring now *beats* holding by 16 points
+  over 15 gameweeks. It makes 16 transfers and pays only one hit.
+- With the **volatile** predictor, transferring still costs about 88 points. It
+  makes 28 transfers and pays thirteen hits.
 
-## Why
+The best single result remains Component holding its opening squad (793), but
+that is one opening squad's luck — see the four-start-point check below.
+
+### Corrected from an earlier version of this document
+
+The first version reported that holding beat transferring for *both* models.
+Three bugs in the simulation biased that, all in the same direction:
+
+- Free transfers were **reset to 1** whenever any transfer was made rather than
+  deducting what was spent, so the simulation paid hits a real manager would
+  not.
+- The **bank was never tracked**, so money unspent at the opening buy was
+  forfeited for the season.
+- The transfer search stopped at 4 transfers while 5 free ones can be banked.
+
+Fixing them halved the season mean's hits (8 → 4) and turned its result from a
+dead heat into a win. The component model's verdict was unaffected — its
+problem is real, not accounting.
+
+## Why the volatile model still loses
 
 `plan_transfers` computes a transfer's gain as
 `(new squad expected points − current squad expected points) × horizon`. That

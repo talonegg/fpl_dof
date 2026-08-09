@@ -71,6 +71,17 @@ fourth. Read the per-season table, not just the pooled mean, and weight
 2025-26 accordingly. A second current-rules season (2026-27) is what would
 settle it.
 
+**Never evaluate a live-only signal on historical data.** Injury status,
+`chance_of_playing_next_round` and betting odds are published only for *now* —
+nobody recorded who was injured in gameweek 12 of 2023-24. Running them over an
+archive season does not fail, it returns "everyone fit" and the signal silently
+contributes nothing, producing a backtest number that looks fine and means
+nothing. `fpl/features/availability.py` raises `AvailabilityUnavailable` rather
+than defaulting; keep that behaviour for any new live-only source. These signals
+earn their place through live use and forward testing, not backtests — which
+means the daily snapshots on the `data` branch are what will eventually make a
+real evaluation possible.
+
 **Model defensive contributions.** 2 points for clearing a threshold of defensive
 actions: 10 CBIT for defenders, 12 CBIRT for midfielders and forwards,
 goalkeepers ineligible. `ComponentPredictor` scores them and degrades to zero on
@@ -88,12 +99,14 @@ points will this player score in GW N". The optimiser answers "given those numbe
 and the FPL rules, what is the best squad". Never let a heuristic about budget or
 team limits leak into a predictor.
 
-**Squad selection is solved; transfer timing is not.** `fpl/optimise/squad.py`
-returns a provably optimal squad — trust it. `fpl/optimise/transfers.py` currently
-*loses* points against simply holding the squad, because it scales one gameweek's
-edge by the horizon and so churns on noise. See `docs/optimiser-results.md`. Do
-not wire transfer recommendations into the UI until a season simulation shows
-them beating a hold.
+**Squad selection is solved; transfer timing depends on the predictor.**
+`fpl/optimise/squad.py` returns a provably optimal squad — trust it.
+`fpl/optimise/transfers.py` beats holding when fed a *stable* predictor
+(SeasonMean: +16 points over 15 gameweeks, 1 hit) and loses badly when fed a
+*volatile* one (Component: −88, 13 hits), because it scales one gameweek's edge
+by the horizon and so churns on noise. See `docs/optimiser-results.md`. Before
+wiring transfer recommendations into the UI, run the season simulation with the
+predictor you intend to use — the answer is not the same for all of them.
 
 **FPL rules live in one place** — `fpl/domain/rules.py`. Budget 100.0, 15-player
 squad (2 GK / 5 DEF / 5 MID / 3 FWD), max 3 per club, valid starting XI formations,
@@ -119,6 +132,16 @@ transfer cost 4 points per extra transfer. Do not hardcode these anywhere else.
   is stale and must be refetched.
 
 ## External sources
+
+**Understat and FBref are off-limits.** Understat's `robots.txt` is
+`User-agent: * / Disallow: /`; FBref sits behind a Cloudflare challenge that
+403s even on `robots.txt`. Both were named in the roadmap; neither can be used,
+and getting past a bot challenge is precisely the evasion these rules exist to
+prevent. What they were wanted for — set-piece duties and shot quality — turns
+out to be published officially: `penalties_order`,
+`corners_and_indirect_freekicks_order`, `direct_freekicks_order` and the
+`expected_*` family all come from `bootstrap-static`. Check the official API
+before reaching for a scraper.
 
 Respect `robots.txt` and site terms. Rate-limit every scraper, cache aggressively,
 identify the client with a real User-Agent, and prefer official APIs where they

@@ -229,8 +229,10 @@ def summarise_many(per_gameweek: pd.DataFrame, metric: str) -> pd.DataFrame:
     if per_gameweek.empty or metric not in per_gameweek.columns:
         return pd.DataFrame()
 
+    from fpl.backtest.significance import LOWER_IS_BETTER
+
     by_season = per_gameweek.groupby(["model", "season"])[metric].mean()
-    return (
+    summary = (
         by_season.groupby("model")
         .agg(["mean", "std", "min", "max", "count"])
         .rename(
@@ -242,5 +244,7 @@ def summarise_many(per_gameweek: pd.DataFrame, metric: str) -> pd.DataFrame:
                 "count": "seasons",
             }
         )
-        .sort_values(metric, ascending=False)
     )
+    # Error metrics improve downwards. Always sorting descending would put the
+    # least accurate model at the top of an MAE table and read as a ranking.
+    return summary.sort_values(metric, ascending=metric in LOWER_IS_BETTER)

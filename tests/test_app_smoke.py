@@ -220,3 +220,37 @@ def test_a_selection_removed_by_a_filter_does_not_break_the_app(
 
     assert not at.exception
     assert at.multiselect(key="comparison_players").value == []
+
+
+# --- Regressions from the second review pass ---
+
+
+def test_the_watchlist_file_is_not_rewritten_on_a_first_render(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    """The widget returns element order; the stored list is sorted by code."""
+    from fpl.features import watchlist
+
+    path = tmp_path / "watchlist.json"
+    codes = [element["code"] for element in bootstrap["elements"][:3]]
+    watchlist.save(path, codes)
+    before = path.stat().st_mtime_ns
+
+    _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    assert path.stat().st_mtime_ns == before, "watchlist rewritten with no user action"
+
+
+def test_comparison_series_keep_their_colour_when_one_is_removed(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    """Colour is assigned by slot, so column order must follow selection order."""
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    elements = [element["id"] for element in bootstrap["elements"][:3]]
+    # Select in an order that is not alphabetical by name.
+    at.multiselect(key="comparison_players").set_value(elements).run()
+    assert not at.exception
+
+    at.multiselect(key="comparison_players").set_value(elements[:2]).run()
+    assert not at.exception

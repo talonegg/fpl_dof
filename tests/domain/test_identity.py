@@ -7,6 +7,7 @@ import pandas as pd
 
 from fpl.domain.identity import (
     add_match_key,
+    ambiguous_names,
     match_rate,
     match_to_current_players,
     normalise_name,
@@ -128,3 +129,63 @@ def test_unknown_position_codes_are_left_alone():
     df = pd.DataFrame([{"position": "AM"}])
 
     assert normalise_positions(df).loc[0, "position"] == "AM"
+
+
+# --- Regressions from the second review pass ---
+
+
+def test_a_name_collision_is_reported_rather_than_guessed_at():
+    """Two Danny Wards cannot be told apart; picking one misattributes a season."""
+    players = pd.DataFrame(
+        [
+            {"element": 1, "first_name": "Danny", "second_name": "Ward"},
+            {"element": 2, "first_name": "Danny", "second_name": "Ward"},
+        ]
+    )
+
+    assert ambiguous_names(players) == ["Danny Ward"]
+
+
+def test_a_colliding_name_does_not_match_at_all():
+    players = pd.DataFrame(
+        [
+            {"element": 1, "first_name": "Danny", "second_name": "Ward"},
+            {"element": 2, "first_name": "Danny", "second_name": "Ward"},
+        ]
+    )
+    archive = pd.DataFrame([{"player_name": "Danny Ward"}])
+
+    matched = match_to_current_players(archive, players)
+
+    assert pd.isna(matched.loc[0, "current_element"])
+    assert match_rate(matched) == 0.0, "an ambiguous match must not count as matched"
+
+
+def test_unique_names_are_unaffected_by_a_collision_elsewhere():
+    players = pd.DataFrame(
+        [
+            {"element": 1, "first_name": "Danny", "second_name": "Ward"},
+            {"element": 2, "first_name": "Danny", "second_name": "Ward"},
+            {"element": 3, "first_name": "Bukayo", "second_name": "Saka"},
+        ]
+    )
+    archive = pd.DataFrame([{"player_name": "Bukayo Saka"}])
+
+    matched = match_to_current_players(archive, players)
+
+    assert matched.loc[0, "current_element"] == 3
+
+
+def test_players_with_no_usable_name_do_not_match_each_other():
+    """Empty keys are equal, so nameless rows would join and count as matches."""
+    players = pd.DataFrame([{"element": 1, "first_name": "", "second_name": ""}])
+    archive = pd.DataFrame([{"player_name": None}])
+
+    matched = match_to_current_players(archive, players)
+
+    assert pd.isna(matched.loc[0, "current_element"])
+    assert match_rate(matched) == 0.0
+
+
+def test_no_collisions_means_nothing_to_report():
+    assert ambiguous_names(PLAYERS) == []
