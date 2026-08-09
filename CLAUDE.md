@@ -133,6 +133,16 @@ transfer cost 4 points per extra transfer. Do not hardcode these anywhere else.
 
 ## External sources
 
+**Understat and FBref are off-limits.** Understat's `robots.txt` is
+`User-agent: * / Disallow: /`; FBref sits behind a Cloudflare challenge that
+403s even on `robots.txt`. Both were named in the roadmap; neither can be used,
+and getting past a bot challenge is precisely the evasion these rules exist to
+prevent. What they were wanted for — set-piece duties and shot quality — turns
+out to be published officially: `penalties_order`,
+`corners_and_indirect_freekicks_order`, `direct_freekicks_order` and the
+`expected_*` family all come from `bootstrap-static`. Check the official API
+before reaching for a scraper.
+
 Respect `robots.txt` and site terms. Rate-limit every scraper, cache aggressively,
 identify the client with a real User-Agent, and prefer official APIs where they
 exist. Never commit API keys — they come from environment variables, read via

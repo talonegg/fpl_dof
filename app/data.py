@@ -12,6 +12,7 @@ import streamlit as st
 from fpl.domain.fixtures import build_team_schedule, next_gameweek
 from fpl.domain.identity import match_to_current_players
 from fpl.domain.players import build_players_frame
+from fpl.features.advanced import add_advanced_metrics
 from fpl.features.availability import add_availability
 from fpl.features.rates import add_scouting_metrics
 from fpl.sources.archive import fetch_season_gameweeks
@@ -48,7 +49,8 @@ def load_next_gameweek() -> int | None:
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner="Adding scouting metrics...")
 def load_scouting_players() -> pd.DataFrame:
     """The player table with rates, value, minutes share and availability."""
-    return add_availability(add_scouting_metrics(load_players(), load_schedule()))
+    players = add_scouting_metrics(load_players(), load_schedule())
+    return add_advanced_metrics(add_availability(players))
 
 
 # Past seasons never change, so this is cached for the life of the process
