@@ -413,11 +413,28 @@ throws away structure the rules encode — per-2 integer division on clearances,
 the position-dependent goal values.
 
 The reconstruction under-counts in 52% of appearances, as expected: the
-unobservable actions are overwhelmingly positive. It also *over*-counts
-occasionally, which is informative — penalties now score 12 for every position
-while the API reports only `goals_scored`, so a midfielder's penalty is
-credited 18 instead of 12. That is the "no penalty/open-play split" limitation
-showing up as a number.
+unobservable actions are overwhelmingly positive.
+
+**The penalty over-credit is real and measured.** Penalties score 12 for every
+position while the API reports only `goals_scored`, so a midfielder's penalty
+is credited 18 and a forward's 24. Comparing known penalty takers — the archive
+identifies them only when they *miss* — against everyone else, on
+goal-scoring appearances:
+
+| Position | Takers | Others | Over-credit |
+|---|---|---|---|
+| Forward | −1.39 | −0.07 | **1.32 BPS** |
+| Midfielder | 3.12 | 3.63 | **0.51 BPS** |
+
+Those imply roughly 11% and 8.5% of a taker's goals are penalties, against a
+league estimate of 9.5% — the magnitudes agree.
+
+`reconstruct(penalty_goals=…)` corrects it, and halves the taker-vs-other bias
+(−2.39 → −1.26). It does **not** improve overall accuracy: mean absolute error
+moves 3.637 → 3.640 and correlation is flat. The 22 unobservable actions
+dominate the error, so a ~1 BPS fix on a tenth of appearances is noise against
+them. It is kept because it is correct, not because it helps — and it can only
+be applied where `penalties_order` exists, which is live data only.
 
 **This is a ceiling, not a gap to close.** A bonus model built on this data
 sees about seven-eighths of BPS and should be described that way.

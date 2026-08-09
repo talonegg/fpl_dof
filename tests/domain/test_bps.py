@@ -9,6 +9,7 @@ from fpl.domain.bps import (
     BPS_ACTIONS,
     action_table,
     observable_actions,
+    penalty_correction,
     reconstruct,
     reconstruction_gap,
     unobservable_actions,
@@ -172,3 +173,61 @@ def test_the_biggest_invisible_action_is_flagged_with_a_reason():
 def test_unobservable_weight_is_the_absolute_bps_we_cannot_see():
     assert unobservable_weight() > 0
     assert unobservable_weight() == sum(abs(a.value) for a in unobservable_actions())
+
+
+# --- Penalty goals score 12 whatever the position ---
+
+
+def test_a_midfielders_penalty_is_credited_six_bps_less_than_an_open_play_goal():
+    frame = pd.DataFrame([appearance("MID", goals_scored=1)])
+    penalty = pd.Series([1.0])
+
+    open_play = reconstruct(frame).iloc[0]
+    from_penalty = reconstruct(frame, penalty_goals=penalty).iloc[0]
+
+    assert open_play - from_penalty == 6  # 18 -> 12
+
+
+def test_a_forwards_penalty_is_credited_twelve_bps_less():
+    frame = pd.DataFrame([appearance("FWD", goals_scored=1)])
+
+    difference = (
+        reconstruct(frame).iloc[0] - reconstruct(frame, penalty_goals=pd.Series([1.0])).iloc[0]
+    )
+
+    assert difference == 12  # 24 -> 12
+
+
+def test_a_defenders_penalty_needs_no_correction():
+    """Their goals are already worth 12."""
+    frame = pd.DataFrame([appearance("DEF", goals_scored=1)])
+
+    assert reconstruct(frame).iloc[0] == reconstruct(frame, penalty_goals=pd.Series([1.0])).iloc[0]
+
+
+def test_a_fractional_penalty_share_scales_the_correction():
+    """Callers supply expected penalty goals, which are rarely whole numbers."""
+    frame = pd.DataFrame([appearance("FWD", goals_scored=1)])
+
+    difference = (
+        reconstruct(frame).iloc[0] - reconstruct(frame, penalty_goals=pd.Series([0.5])).iloc[0]
+    )
+
+    assert difference == 6
+
+
+def test_no_penalty_goals_leaves_the_reconstruction_untouched():
+    frame = pd.DataFrame([appearance("FWD", goals_scored=2)])
+
+    assert reconstruct(frame).iloc[0] == reconstruct(frame, penalty_goals=pd.Series([0.0])).iloc[0]
+
+
+def test_the_correction_is_never_negative():
+    """It only ever removes over-credit; it cannot invent BPS."""
+    frame = pd.DataFrame([appearance("GK", goals_scored=1), appearance("DEF", goals_scored=1)])
+
+    assert (penalty_correction(frame, pd.Series([1.0, 1.0])) >= 0).all()
+
+
+def test_correcting_an_empty_frame_is_safe():
+    assert penalty_correction(pd.DataFrame(), pd.Series(dtype="float64")).empty

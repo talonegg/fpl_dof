@@ -115,7 +115,28 @@ def unobservable_actions() -> tuple[BpsAction, ...]:
     return tuple(action for action in BPS_ACTIONS if not action.available)
 
 
-def reconstruct(appearances: pd.DataFrame) -> pd.Series:
+PENALTY_GOAL_BPS = 12
+
+
+def penalty_correction(appearances: pd.DataFrame, penalty_goals: pd.Series) -> pd.Series:
+    """How much a naive reconstruction over-credits penalty goals.
+
+    Since 2025-26 a penalty scores 12 BPS whatever the position, but the API
+    reports only ``goals_scored``, so a midfielder's penalty is credited 18 and
+    a forward's 24. The excess is ``position value − 12`` per penalty.
+
+    Returns a positive number to be *subtracted*. Zero for goalkeepers and
+    defenders, whose goals are already worth 12.
+    """
+    if appearances.empty:
+        return pd.Series(dtype="float64")
+
+    positions = appearances["position"].map(canonical_position)
+    excess = positions.map(GOAL_BPS).fillna(0) - PENALTY_GOAL_BPS
+    return penalty_goals.fillna(0) * excess.clip(lower=0)
+
+
+def reconstruct(appearances: pd.DataFrame, penalty_goals: pd.Series | None = None) -> pd.Series:
     """BPS rebuilt from the published coefficients and available inputs only.
 
     Deliberately *not* fitted. Applying the real values and seeing what is
@@ -124,6 +145,13 @@ def reconstruct(appearances: pd.DataFrame) -> pd.Series:
 
     Always an underestimate: every unobservable action in the table is
     positive far more often than not.
+
+    ``penalty_goals`` optionally supplies how many of each player's goals were
+    penalties, so they can be credited at 12 rather than the position value.
+    Supplying it needs ``penalties_order``, which is live-only — the archive
+    identifies a taker only when they miss — so historical reconstructions
+    leave it out and over-credit takers by a measured 0.5 to 1.3 BPS per
+    goal-scoring appearance.
     """
     if appearances.empty:
         return pd.Series(dtype="float64")
@@ -156,6 +184,9 @@ def reconstruct(appearances: pd.DataFrame) -> pd.Series:
     total = total + column("red_cards") * RED_BPS
     total = total + column("own_goals") * OWN_GOAL_BPS
     total = total + column("penalties_missed") * MISSED_PENALTY_BPS
+
+    if penalty_goals is not None:
+        total = total - penalty_correction(appearances, penalty_goals)
 
     return total
 
