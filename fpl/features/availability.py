@@ -233,6 +233,59 @@ def parse_return_date(news: object, anchor: date | None = None) -> date | None:
     return None
 
 
+# Most news reads "<reason> - <when>", so the reason is simply what precedes
+# the separator. The exceptions have no separator and need naming.
+REASON_SEPARATOR = " - "
+SUSPENSION_PATTERN = re.compile(r"suspended until", re.IGNORECASE)
+LOAN_PATTERN = re.compile(r"joined\s+(.+?)\s+on loan", re.IGNORECASE)
+PERMANENT_MOVE_PATTERN = re.compile(r"joined\s+(.+?)\s+permanently", re.IGNORECASE)
+RETURNED_PATTERN = re.compile(r"returned to\s+(.+?)\.?$", re.IGNORECASE)
+FREE_AGENT_PATTERN = re.compile(r"departed the club", re.IGNORECASE)
+
+REASON_SUSPENSION = "Suspension"
+REASON_LEFT = "Left the club"
+REASON_UNKNOWN = "Unknown"
+
+
+def unavailability_reason(news: object) -> str:
+    """Why the player is unavailable: "Hamstring injury", "Suspension", …
+
+    The reason and the timing are different questions and the API answers both
+    in one sentence. This pulls out the first; :func:`parse_return_date` and
+    :func:`return_status` handle the second.
+    """
+    if not isinstance(news, str) or not news.strip():
+        return ""
+
+    news = news.strip()
+
+    if SUSPENSION_PATTERN.search(news):
+        return REASON_SUSPENSION
+
+    loan = LOAN_PATTERN.search(news)
+    if loan:
+        return f"On loan at {loan.group(1)}"
+
+    permanent = PERMANENT_MOVE_PATTERN.search(news)
+    if permanent:
+        return f"Transferred to {permanent.group(1)}"
+
+    returned = RETURNED_PATTERN.search(news)
+    if returned:
+        return f"Returned to {returned.group(1)}"
+
+    if FREE_AGENT_PATTERN.search(news):
+        return REASON_LEFT
+
+    if REASON_SEPARATOR in news:
+        reason = news.split(REASON_SEPARATOR, 1)[0].strip()
+        return reason[:1].upper() + reason[1:] if reason else REASON_UNKNOWN
+
+    # Something unrecognised: show it rather than swallowing it, so a new
+    # phrasing surfaces as odd text instead of a silently blank column.
+    return news[:1].upper() + news[1:]
+
+
 def return_status(news: object) -> str:
     """Why a return date is or is not known, as a groupable label."""
     if not isinstance(news, str) or not news.strip():
@@ -258,6 +311,7 @@ def add_return_dates(players: pd.DataFrame) -> pd.DataFrame:
     if "news" not in df.columns:
         df["return_date"] = pd.NaT
         df["return_status"] = RETURN_NOT_APPLICABLE
+        df["reason"] = ""
         return df
 
     anchors = (
@@ -272,6 +326,7 @@ def add_return_dates(players: pd.DataFrame) -> pd.DataFrame:
         ]
     )
     df["return_status"] = df["news"].map(return_status)
+    df["reason"] = df["news"].map(unavailability_reason)
     return df
 
 

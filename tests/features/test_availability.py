@@ -31,6 +31,7 @@ from fpl.features.availability import (
     parse_return_date,
     return_status,
     selectable,
+    unavailability_reason,
 )
 
 PLAYERS = pd.DataFrame(
@@ -302,3 +303,88 @@ def test_return_dates_on_the_real_snapshot(bootstrap):
 
     assert result["return_status"].notna().all()
     assert (result["return_status"] != "").all()
+
+
+# --- The reason for unavailability, as distinct from its timing ---
+
+
+def test_an_injury_reason_is_the_text_before_the_separator():
+    assert unavailability_reason("Hamstring injury - Expected back 23 Aug") == "Hamstring injury"
+    assert unavailability_reason("Knee injury - Unknown return date") == "Knee injury"
+
+
+def test_a_non_injury_reason_is_kept_verbatim():
+    assert (
+        unavailability_reason("Lack of match fitness - 25% chance of playing")
+        == "Lack of match fitness"
+    )
+
+
+def test_a_suspension_is_named_as_one():
+    """It has no separator, so the generic split would return the whole sentence."""
+    assert unavailability_reason("Suspended until 29 Aug") == "Suspension"
+
+
+def test_a_loan_names_the_club():
+    assert (
+        unavailability_reason("Has joined Leicester City on loan for the rest of the season")
+        == "On loan at Leicester City"
+    )
+
+
+def test_a_permanent_move_names_the_club():
+    assert (
+        unavailability_reason("Has joined New England Revolution permanently")
+        == "Transferred to New England Revolution"
+    )
+
+
+def test_a_return_to_a_parent_club_names_it():
+    assert unavailability_reason("has returned to Getafe CF") == "Returned to Getafe CF"
+
+
+def test_a_free_agent_departure_is_named():
+    assert unavailability_reason("has departed the club as a free agent.") == "Left the club"
+
+
+def test_no_news_means_no_reason():
+    assert unavailability_reason("") == ""
+    assert unavailability_reason(None) == ""
+
+
+def test_an_unrecognised_phrasing_is_shown_rather_than_swallowed():
+    """A new wording should look odd in the UI, not silently blank."""
+    assert unavailability_reason("gone fishing") == "Gone fishing"
+
+
+def test_add_return_dates_attaches_the_reason():
+    result = add_return_dates(NEWS)
+
+    assert result["reason"].tolist() == [
+        "Groin injury",
+        "Knee injury",
+        "Suspension",
+        "Knee injury",
+        "On loan at Leicester City",
+        "Left the club",
+        "",
+    ]
+
+
+def test_the_reason_distinguishes_unknown_return_from_departure():
+    """Both show no return date; only the reason says which is which."""
+    result = add_return_dates(NEWS)
+
+    unknown = result[result["web_name"] == "Unknown"].iloc[0]
+    gone = result[result["web_name"] == "Gone"].iloc[0]
+
+    assert pd.isna(unknown["return_date"]) and pd.isna(gone["return_date"])
+    assert unknown["reason"] != gone["reason"]
+
+
+def test_every_reason_on_the_real_snapshot_is_populated(bootstrap):
+    from fpl.domain.players import build_players_frame
+
+    result = add_return_dates(flagged(build_players_frame(bootstrap)))
+
+    assert (result["reason"].str.len() > 0).all()
