@@ -7,6 +7,8 @@ Phase 6 architecture review, when adding a feature became cheap enough that
 Each item names what it unblocks and what it depends on. Anything whose
 prerequisite has not landed is marked, because the ordering is not arbitrary.
 
+**Last reviewed:** after the season-opening squad constructor shipped.
+
 ## What adding a feature costs now
 
 - **A new tab**: one entry in `app/registry.py` and one render function. The
@@ -16,116 +18,162 @@ prerequisite has not landed is marked, because the ordering is not arbitrary.
   caller picks it up; `provider_of()` answers where it came from.
 - **A new predictor**: implement the `Predictor` protocol, add to
   `baselines.py`, and the comparison table includes it.
+- **A new season-opening model**: add it to `strategies()` in
+  `fpl/models/preseason_strategies.py` and it is measured against every
+  benchmark, season and horizon automatically.
 - **A new external source**: implement `Source`, and a failure degrades that
   panel rather than the app.
 
+## Done since the last review
+
+| Item | Where it landed | What it measured |
+|---|---|---|
+| Horizon-based selection metric | `fpl/backtest/horizon.py` | Season mean wins at every horizon; gap widens tenfold |
+| Minutes model | `fpl/models/minutes_forecast.py` | Recency wins for minutes, stability for points |
+| Season-opening squad constructor | four modules, see below | 19% → 52% of ceiling from the minutes term alone |
+| Squad tab in the UI | `app/preseason_view.py` | Top twenty squads span 0.14% — the ranking is noise |
+| Defensive contributions | `fpl/features/defensive.py` | 13.6% of defender points; forecastable from 2026-27 |
+| Three-horizon scoring | `SCORING_HORIZONS = (3, 5, 7)` | Model edge is real at GW3, gone by GW7 |
+
+The season-opening work is now four modules rather than a plan:
+`features/preseason_pool.py` (candidate pool), `models/preseason_strategies.py`
+(six registered models), `optimise/preseason.py` (constructor and recommender),
+`backtest/preseason.py` (replay only).
+
+### What that work changed about the priorities below
+
+**Prediction quality is not the binding constraint, and this is now the sixth
+measurement saying so.** Six refinements — component scoring, xG over actuals,
+penalty correction, horizon scoring, fixture difficulty, forcing the full budget
+— have failed to beat a per-90 rate scaled by expected minutes. Items that
+propose *better expected points* should be read with that history in mind. Items
+that address coverage, timing or presentation should be read more favourably
+than they were a review ago.
+
 ## Tier 1 — do these next
 
-### 1. Responsive pass at 375px
+### 1. Position-and-price prior for players with no history
+
+**Effort: small. Value: the largest unmodelled gap in the constructor.**
+
+**35% of the priced pool (239 of 690) carries no prior Premier League minutes**
+and is dropped before the optimiser sees it. 160 of those are under £5.0m —
+precisely the bench slots a real squad must fill. They are not rated poorly;
+they are unrated, and the optimiser cannot buy them at all.
+
+The design (§2, §5 of `season-opening-squad.md`) specifies a
+`NewPlayerEstimator` seam and a price-band prior. It is the one gap where the
+fix is cheap, the data already exists, and the current behaviour is a hard
+restriction on the search space rather than a modelling nicety.
+
+**Watch for:** this makes the pool larger, not better. The right test is whether
+the backtest improves, not whether the squads look more complete.
+
+### 2. Responsive pass at 375px
 
 **Effort: small. Risk of not doing it: high.**
 
-`CLAUDE.md` requires a phone to work and the app has never been *looked at* in
-a browser — every verification so far has been through `AppTest`, which
-exercises the render path but sees no layout. The app has grown from one table
-to three tabs, a global sidebar, charts and a footer table since that rule was
-written.
+Still outstanding, and the Season opener tab has made it more pressing: it
+renders a seven-column shortlist, a fifteen-row squad table and an expander.
+`NARROW_COLUMNS` exists in `app/preseason_view.py` but nothing currently sets
+`narrow=True` — the mechanism is built and unwired.
 
-Needs Playwright (~150 MB of browser binaries) to do honestly. Without it,
-this can be restructured for known-good patterns but not *verified*, which is
-the same position the last four phases have been in.
+Needs Playwright (~150MB) or a manual pass at phone width.
 
-### 2. "My Team" import
+### 3. "My Team" import
 
-**Effort: medium. Unblocks: everything about transfers.**
+**Effort: medium. Blocked on:** your FPL entry id.
 
-`entry/{id}/` and `entry/{id}/event/{gw}/picks/` give the squad you actually
-own. Until then the optimiser answers "what is the best squad" rather than
-"what should *you* do", which is a different and much more useful question.
-
-Prerequisite for any transfer recommendation being meaningful.
-
-### 3. Fix the penalty-goal distortion in the component model
-
-**Effort: small. Directly improves the best-ranking model.**
-
-Penalties score 12 BPS for every position, but the API reports only
-`goals_scored`, so a midfielder's penalty is credited 18 and a forward's 24.
-`penalties_order` identifies the takers, so their goals can be discounted
-towards the penalty share. This is the largest *known* modelling error, and it
-is correctable without new data.
+Every recommendation is currently in the abstract. The transfer optimiser
+already works and the season-opening constructor already works; neither knows
+what you actually own. This is the difference between a model and a tool.
 
 ## Tier 2 — worth doing once Tier 1 lands
 
-### 4. Horizon-based selection metric
+### 4. Captaincy
 
-Every model comparison so far scores the predicted top 15 for *one* gameweek.
-You pick a squad for five to seven. A horizon metric might reward the ranking
-skill the component model demonstrably has and which has so far converted into
-nothing — see `docs/model-results.md`.
+**Effort: small. Never yet measured.**
 
-This is the cheapest remaining shot at the central puzzle of the project.
+Named in `CLAUDE.md` as comparatively untouched, and it remains so. The
+optimiser picks a captain as a by-product of squad selection; nobody has asked
+whether that choice is any good, or whether captaincy is where the recoverable
+points are given that squad selection is solved and prediction is saturated.
 
-### 5. Minutes model
+A captain doubles a score, so it is the single highest-leverage weekly decision
+and the cheapest thing left to evaluate.
 
-Not playing is the largest single cause of a zero score, and it is the one
-input where the data is complete: `starts`, `minutes`, `chance_of_playing`,
-and now a daily capture of all three. Unlike bonus points, there is no ceiling
-imposed by unpublished data.
+### 5. Fix the penalty-goal distortion in the component model
 
-### 6. Wire odds into the component model
+**Effort: small.** Still open. xG includes penalties at ~0.76 each, so a
+penalty taker's open-play rate is overstated. `fpl/features/penalties.py` has
+the taker probabilities; the component model does not use them.
 
-Depends on an `ODDS_API_KEY`. The market is the strongest freely available
-prior and `fpl/features/market.py` already converts it to per-team expected
-goals and clean-sheet probability. Blocked only on the key, and on the honest
-caveat that live-only signals cannot be backtested — so this earns its place by
-forward testing, not by a backtest.
+Lower priority than a review ago, because the component model is not currently
+the recommended one — it loses to the simpler minutes-scaled rate.
 
-### 7. Squad tab in the UI
+### 6. Wire odds into team strength
 
-The optimiser is trustworthy and has no interface. A tab showing the optimal
-squad for a chosen predictor, with the constraints visible, would make Phase 4
-usable rather than merely correct. Cheap now that a tab is one registry entry.
+**Effort: medium. Blocked on:** `ODDS_API_KEY`.
 
-**Not** the transfer planner: that stays out until a season simulation shows it
-beating a hold for the predictor in use.
+The market prices promotion and squad changes better than a blended historical
+average can, and `TeamStrengthEstimator` is the seam. Live-only, so it earns its
+place through forward testing rather than a backtest.
+
+### 7. Transfer recommendations in the UI
+
+**Effort: medium. Depends on:** item 3.
+
+`fpl/optimise/transfers.py` beats holding when fed a *stable* predictor and
+loses badly when fed a volatile one. Before wiring it in, run the season
+simulation with the predictor you intend to ship — the answer is not the same
+for all of them.
 
 ## Tier 3 — speculative, or waiting on data
 
-### 8. Measure the penalty-taker shares
+### 8. A second current-rules season
 
-`TAKER_SHARE` is currently an assumption. It becomes measurable once a season
-of daily captures exists, because `penalties_order` is finally being recorded.
-Revisit around GW10.
+**Waiting on:** 2026-27 completing. Nothing to build.
 
-### 9. Bonus points model
+The single most valuable thing that could happen to this project, and it
+requires only time. It would settle three open questions at once: whether the
+season mean's pooled advantage survives current rules, whether defensive
+contributions change model ordering once forecastable, and whether the models'
+2025-26 defeat was caused by their blindness to that scoring route.
 
-Capped at roughly seven-eighths of BPS by unpublished Opta data — see
-`docs/data-model.md`. Worth building only after the minutes model, since that
-ceiling does not apply there.
+### 9. Measure the penalty-taker shares
 
-### 10. DuckDB read layer
+**Waiting on:** a season of daily snapshots, now being captured.
 
-Recommended in `docs/data-model.md`, but only when a query first spans seasons.
-Adding it before then is infrastructure for its own sake.
+### 10. Bonus points model
 
-### 11. Weekly digest
+**Effort: medium.** `domain/bps.py` reconstructs 87% of BPS. The remaining 13%
+is unpublished Opta data and is not closable.
 
-A scheduled Action running post-deadline and writing a markdown summary.
-Pleasant, not load-bearing.
+### 11. DuckDB read layer
 
-### 12. Pundit and social sentiment
+**Effort: medium.** Only worth it if parquet loading becomes the bottleneck. It
+is not.
 
-Deferred from Phase 5 with reasoning recorded in `ROADMAP.md`: the weakest
-signal in the phase, the most expensive to build, and live-only so it can never
-satisfy the backtest rule.
+### 12. Weekly digest
+
+**Effort: small.** A scheduled Action running post-deadline into a markdown
+summary. Cheap, and more useful once item 3 lands.
+
+### 13. Pundit and social sentiment
+
+**Deferred, deliberately.** The weakest signal and the most expensive to build,
+and *live-only* — it can never be justified by a backtest the way `CLAUDE.md`
+requires. If picked up: an opinion panel attributed to its source, kept out of
+the expected-points model.
 
 ## Explicitly not recommended
 
-| Idea | Why not |
-|---|---|
-| Scraping Understat or FBref | `robots.txt` disallows one; the other 403s behind Cloudflare |
-| A database | 22 MB, no concurrent writers — parquet on the `data` branch is correct until it is not |
-| Persisting derived columns | They are pure functions of the sources; storing them creates something that can go stale |
-| More predictors before a better metric | Five exist and the best one converts its advantage into nothing. The metric is the bottleneck, not the model |
-| Transfer recommendations in the UI | Loses points with a volatile predictor; needs the season simulation to say otherwise first |
+- **More expected-points refinements without a hypothesis about coverage or
+  timing.** Six have now failed to move selection. The next one needs a reason
+  to be different, stated before it is built.
+- **Understat and FBref.** `robots.txt` forbids one and a bot challenge blocks
+  the other. What they were wanted for is published officially.
+- **A fifth chart colour.** The palette is validated for four; cap the series
+  and say so.
+- **Ranking-metric optimisation.** Rank correlation and selection skill are
+  inverted in this problem. Every model that ranks better has picked worse.

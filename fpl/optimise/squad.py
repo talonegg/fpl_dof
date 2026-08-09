@@ -50,7 +50,19 @@ class Squad:
     bench: pd.DataFrame
     captain: int
     expected_points: float
+    """Starting XI plus the captain's doubled score. What the manager banks."""
+
     cost: float
+
+    objective: float = 0.0
+    """The value actually maximised: ``expected_points`` plus the bench at
+    ``bench_weight``.
+
+    Reported separately because the two order squads differently. A squad with
+    a stronger bench can win on the objective while showing fewer expected
+    points, which looks like a ranking error and is not one -- anything ranking
+    squads must order by this, not by ``expected_points``.
+    """
 
     @property
     def players(self) -> pd.DataFrame:
@@ -93,6 +105,19 @@ class SquadConstraints:
     # planner to hold the rest of a squad still while it changes a few places.
     must_include: tuple[int, ...] = ()
     must_exclude: tuple[int, ...] = ()
+
+    # Exact squads already returned, forbidden from being returned again. Each
+    # is a "no-good cut": at most 14 of these 15 may be picked together, which
+    # rules out that one combination and nothing else. Excluding the *players*
+    # instead would throw away every squad containing any of them, and the
+    # second-best squad usually shares thirteen or fourteen with the best.
+    forbidden_squads: tuple[frozenset[int], ...] = ()
+
+    # Minimum spend. Unspent budget earns nothing, so a squad leaving money
+    # behind has usually mispriced someone rather than found a bargain --
+    # but forcing a spend can also buy a worse player, so this is optional and
+    # its effect is measured rather than assumed.
+    min_spend: float = 0.0
 
 
 class InfeasibleSquad(ValueError):
@@ -158,6 +183,8 @@ def optimise_squad(players: pd.DataFrame, constraints: SquadConstraints | None =
     problem += pulp.lpSum(starting[e] for e in elements) == constraints.starting_size
     problem += pulp.lpSum(captain[e] for e in elements) == 1
     problem += pulp.lpSum(price[e] * squad[e] for e in elements) <= constraints.budget
+    if constraints.min_spend > 0:
+        problem += pulp.lpSum(price[e] * squad[e] for e in elements) >= constraints.min_spend
 
     for element in elements:
         problem += starting[element] <= squad[element]
@@ -175,6 +202,11 @@ def optimise_squad(players: pd.DataFrame, constraints: SquadConstraints | None =
         problem += (
             pulp.lpSum(squad[e] for e in elements if club[e] == team) <= constraints.max_per_club
         )
+
+    for forbidden in constraints.forbidden_squads:
+        present = [squad[e] for e in elements if e in forbidden]
+        if len(present) >= constraints.squad_size:
+            problem += pulp.lpSum(present) <= constraints.squad_size - 1
 
     for element in constraints.must_include:
         if element not in points:
@@ -203,6 +235,7 @@ def optimise_squad(players: pd.DataFrame, constraints: SquadConstraints | None =
         captain=int(captained),
         expected_points=float(starters["expected_points"].sum() + points[captained]),
         cost=float(selected["price"].sum()),
+        objective=float(pulp.value(problem.objective) or 0.0),
     )
 
 

@@ -101,3 +101,18 @@ is best spent.
 **A missed run is not detected.** If the workflow fails, nothing notices until
 someone looks. The daily files are named by date, so a gap is visible after the
 fact via `captured_dates()`, but there is no alert.
+
+## Archive seasons, and the pre-season pool
+
+Added when the season-opening constructor shipped.
+
+Completed seasons **never change**, so `app/data.py:load_prior_seasons` caches
+them for the life of the process rather than on a clock — unlike the live
+endpoints, which carry a one-hour TTL because prices and injury news move.
+
+A season that fails to download is **omitted and reported**, never silently
+skipped. This is not a hypothetical: a loader that swallowed a failure once
+dropped 2024-25 from a four-season run and cut the observation count from 131
+to 98 without a word, and every blended rate downstream was quietly computed
+from three seasons while the report claimed four. The Season opener tab renders
+an error naming the missing seasons rather than showing numbers that look fine.

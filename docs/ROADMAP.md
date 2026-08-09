@@ -3,6 +3,9 @@
 Each phase is independently useful and shippable. Do not start a phase until the
 previous one is deployed and green.
 
+**Status:** Phases 0–7 are done and deployed. Phase 8 is the current one, and
+its theme is different from everything before it — see the note there.
+
 ---
 
 ## Phase 0 — Foundations (1 sitting)
@@ -121,13 +124,47 @@ its markup fails CI loudly instead of silently poisoning the model.
 
 ---
 
-## Phase 6 — Polish
+## Phase 6 — Architecture and data model
 
-- Responsive pass at 375px / 768px / 1280px.
-- "My Team" import via your FPL entry id, with recommendations relative to your
-  actual squad.
-- Weekly digest: a scheduled Action that runs the model post-deadline and writes
-  a markdown summary.
+**Done.** Layering enforced by `tests/test_architecture.py` (seven layers,
+two real violations found and fixed). Derivations moved into
+`fpl/features/registry.py`. Tabs registered in `app/registry.py` with declared
+filter contracts. Data model and sources documented and enforced by
+`tests/test_lineage.py`. Refresh schedule documented and enforced by
+`tests/store/test_refresh.py`.
+
+## Phase 7 — Season-opening squad
+
+**Done.** The largest single piece of modelling in the project, and the one
+that produced its clearest result.
+
+- Cross-season blended rates (`features/career.py`), team defensive strength
+  (`features/team_strength.py`), pre-season minutes
+  (`models/minutes_forecast.py:PreseasonMinutes`).
+- A component model (`models/preseason.py`) and a registry of six
+  interchangeable strategies (`models/preseason_strategies.py`).
+- Constructor and recommender (`optimise/preseason.py`), ranked shortlist
+  (`optimise/ranking.py`), and the Season opener tab.
+- Backtested across three seasons at three horizons.
+
+**The finding:** minutes are the binding constraint. The same model went from
+19% of the achievable ceiling to 52% by adding a minutes forecast; every
+refinement on top moved it by a few points and none consistently. See
+`docs/season-opening-squad.md` §10.
+
+## Phase 8 — Making it a tool rather than a model
+
+**Not started.** The theme, now that squad construction is solved and
+prediction is saturated:
+
+- **"My Team" import** via an FPL entry id, so recommendations are relative to
+  what you actually own rather than in the abstract.
+- **Captaincy**, never yet measured, and the highest-leverage weekly decision.
+- **The unrated third of the pool** — 35% of priced players carry no Premier
+  League history and cannot currently be bought at all.
+- **Responsive pass at 375px**, still outstanding.
+
+See `docs/backlog.md` for the ordering and what each depends on.
 
 ---
 
@@ -152,27 +189,9 @@ Face Spaces are the fallbacks if you outgrow it.
 
 ## Backlog
 
-Things worth doing eventually, deliberately not scheduled.
-
-### Pundit and social sentiment
-
-YouTube Data API + transcripts, RSS from FPL blogs, LLM extraction into
-structured `(player, sentiment, claim, source, date)` rows, surfaced as an
-opinion panel.
-
-Deferred because it is the weakest signal in Phase 5 and the most expensive to
-build: it needs an extraction pipeline, an API key, and ongoing prompt
-maintenance, and it is *live-only*, so it can never be justified by a backtest
-the way `CLAUDE.md` requires. Everything cheaper has been done first.
-
-If it is picked up: it stays an opinion panel attributed to its source, and it
-does not enter the expected-points model.
-
-### Set-piece and price-change history
-
-`fpl/sources/snapshot.py` now records these daily. Once a season of captures
-exists, "does a change in penalty duty move points" becomes answerable —
-which is the only route to evaluating any live-only signal.
+Moved to `docs/backlog.md`, which is reviewed against what actually shipped
+rather than against what was planned. Keeping two lists meant one of them was
+always wrong.
 
 ## The trap to avoid
 
