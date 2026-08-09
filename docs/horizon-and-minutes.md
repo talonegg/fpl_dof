@@ -119,3 +119,37 @@ itself: **prediction quality is not the binding constraint on selection.**
 4. **The remaining upside is probably not in the predictor.** Four phases of
    modelling have produced no significant selection gain. Squad construction,
    transfer timing and captaincy are untouched by comparison.
+
+## Since this was written: the season-opening case
+
+The horizons here (1 to 6 gameweeks, in-season) have a pre-season counterpart
+in `fpl/backtest/preseason.py`, scored at **3, 5 and 7** gameweeks. The lesson
+transferred, and sharpened:
+
+- **In-season**, the season mean wins at every horizon and the gap *widens*
+  with the horizon, because its picks barely change.
+- **Pre-season**, the opposite: the model's advantage over the naive heuristic
+  is largest at three gameweeks (42% against 38% of the achievable ceiling)
+  and **gone by seven** (52% against 52%).
+
+Both are the same underlying fact from two directions. A prior-season points
+total is a good estimate of season-long value and a poor estimate of who starts
+in August, so a model that forecasts minutes wins early and its edge decays as
+the squad gets rebuilt by transfers.
+
+The practical consequence is the one this document already argued for: **score
+at more than one horizon**. Scoring the opening squad only at gameweek 7 — as
+the first design did — reported a dead heat and would have concluded there was
+nothing there.
+
+## Minutes, pre-season
+
+`PreseasonMinutes` is the pre-season member of the forecaster family. It cannot
+read recent gameweeks because there are none, so it works from career
+aggregates and regresses thin histories towards the population.
+
+It is also where this project's largest measured effect lives: adding it took
+the same model from **19% of the achievable ceiling to 52%**. The recency-versus-
+stability finding above concerns *which* minutes forecaster to use; this
+concerns whether to forecast minutes at all, and that question turns out to
+dominate every refinement layered on top of it.

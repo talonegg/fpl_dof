@@ -126,3 +126,32 @@ That is one season and 33 gameweeks — the same sample that got the sign wrong 
 **Nothing built in Phase 3 beats a season average across the pool.** Treat rank correlation as a diagnostic only: optimising it has, so far, made pooled selection worse.
 
 **Caveat.** Four seasons of one league, sharing many of the same players, and — importantly — not sharing the same scoring rules. Independent they are not.
+
+## Postscript: the same disagreement appeared in the season-opening backtest
+
+Written after `docs/season-opening-squad.md` §10 measured a different problem
+with the same seasons, and found the same fault line.
+
+Picking a squad *before* a season starts, every model beats the naive
+prior-season-points heuristic in 2023-24 and 2024-25 and **loses to it in
+2025-26**, at all three horizons. That is the same shape as above: the pooled
+mean favours the models, the current-rules season does not.
+
+Two things are worth separating carefully, because it is tempting to merge
+them:
+
+1. **2025-26 is the only season under current scoring rules.** Established.
+2. **2025-26 is also the only season where the models were blind to a scoring
+   route worth 8.2% of all points** — defensive contributions existed but no
+   prior season recorded the underlying actions, so nothing could forecast
+   them. Established.
+
+**It is not established that the second causes the first.** The heuristic was
+equally blind to defensive contributions, so blindness alone does not explain
+why it won. It remains an open question, and 2026-27 — the first season where
+defensive contributions are forecastable — is what would separate the two
+explanations.
+
+The caution at the head of this document therefore stands and is now supported
+by a second, independent measurement: **do not read the pooled result as
+settled for the season being played.**

@@ -552,3 +552,20 @@ on disk as parquet; a daily capture is 34 KB, about 10 MB a season.
 | Numbers sent as JSON strings | FPL API | Coerced at the boundary |
 | `chance_of_playing` null means "no news" | FPL API | `status` is the authority |
 | Corner order starts at 2, not 1 | FPL API | First choice = lowest order per club |
+| Defensive action counts exist for 2018-19 and 2025-26 only | archive | Gated on the *season's rules*, not the column's presence — see below |
+| 2018-19 names are `Aaron_Cresswell_402` | archive | A different format from every later season; it will not join without normalising, and 2018-19 also lacks `position` |
+| 35% of priced players have no prior-season minutes | derived | Left null rather than guessed, and therefore excluded from squad selection |
+
+### Defensive contributions: three states, not two
+
+The clearest case of why "is the column present" is the wrong question:
+
+| Season | Column | Correct behaviour |
+|---|---|---|
+| 2023-24, 2024-25 | absent | Score zero — the rule did not exist |
+| 2025-26 | present *in that season only* | A model picking a squad **before** it has no prior data. Not zero: blind |
+| 2026-27 onward | present in the prior season | Forecastable |
+
+`domain/rules.py:season_scores_defensive_contributions` gates on the season.
+Gating on the column would make the first two indistinguishable, and zero is
+right for one and wrong for the other.
