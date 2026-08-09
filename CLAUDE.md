@@ -63,6 +63,10 @@ needs a `pytest -m backtest` case reporting its metrics against the baselines in
 `fpl/backtest/baselines.py`. A model that does not beat the benchmark
 (`SeasonMeanPredictor`) on held-out gameweeks does not get wired into the UI.
 
+Five measured improvements have now failed to move selection significantly.
+Prediction quality is not the binding constraint; squad construction, transfer
+timing and captaincy are comparatively untouched.
+
 **Evaluate on all four seasons, never one.** `scripts/backtest_seasons.py` is the
 authority; `scripts/backtest.py` is single-season and kept only for quick
 iteration. This is not pedantry — on 2025-26 alone the component model looked
@@ -93,6 +97,18 @@ actions: 10 CBIT for defenders, 12 CBIRT for midfielders and forwards,
 goalkeepers ineligible. `ComponentPredictor` scores them and degrades to zero on
 seasons lacking the column — correct for those seasons, but it means pre-2025-26
 results understate any DC-aware model.
+
+**Score over a horizon, and count turnover.** `fpl/backtest/horizon.py` scores
+a prediction against the five-to-seven gameweeks you actually hold a squad for,
+and reports how much the top fifteen churns between weeks. Both matter: the
+season mean wins at every horizon and the gap *widens* tenfold from one week to
+six, because its picks barely change (14% turnover against the component
+model's 35%). See `docs/horizon-and-minutes.md`.
+
+**Recency wins for minutes, stability wins for points.** The season average is
+the best points predictor and the *worst* minutes forecaster. Scoring rate is a
+stable property of a player; availability is a volatile property of their
+situation. Do not apply one lesson to the other problem.
 
 **Rank correlation is a diagnostic, not a target.** Ranking skill and selection
 skill are inverted in this problem: the season mean is the worst ranker in the
