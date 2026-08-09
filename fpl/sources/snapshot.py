@@ -64,6 +64,14 @@ DAILY_SIGNAL_COLUMNS = (
     "transfers_out_event",
     # Cheap context for interpreting the above.
     "form",
+    # Defensive contribution inputs. Kept alongside the published total so the
+    # threshold stays recomputable if the rule changes, and so the identity
+    # between them can be checked rather than assumed.
+    "clearances_blocks_interceptions",
+    "tackles",
+    "recoveries",
+    "defensive_contribution",
+    "bps",
     "total_points",
     "minutes",
 )

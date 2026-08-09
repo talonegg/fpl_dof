@@ -146,7 +146,19 @@ erDiagram
         int total_points
         float expected_goals
         float expected_assists
-        int defensive_contribution "2025-26 onwards only"
+        int clearances_blocks_interceptions "DC input"
+        int tackles "DC input"
+        int recoveries "DC input, midfielders and forwards only"
+        int defensive_contribution "= CBIT or CBIRT by position"
+        int bps "total only; components not published"
+        int bonus
+        int saves
+        int goals_conceded
+        int own_goals
+        int penalties_saved
+        int penalties_missed
+        int yellow_cards
+        int red_cards
     }
     DAILY_SIGNAL {
         date captured_on PK
@@ -210,6 +222,56 @@ compares models at different games.
 
 **`DAILY_SIGNAL` is the only append-only table.** Everything else can be
 rebuilt from its source; this one cannot be rebuilt at all.
+
+## Scoring inputs: what the model must capture
+
+Two scoring routes reward the same kind of work and differ in one decisive
+way — one is fully recoverable from published data and the other is not.
+
+### Defensive contributions — recoverable, and verified
+
+Two points for clearing a threshold of defensive actions in a match:
+
+| Position | Counts | Threshold |
+|---|---|---|
+| Defender | clearances + blocks + interceptions + tackles (**CBIT**) | 10 |
+| Midfielder / Forward | the same **plus recoveries** (**CBIRT**) | 12 |
+| Goalkeeper | not eligible | — |
+
+The API publishes both the components and the total they sum to, so the
+identity can be *checked* rather than assumed. Verified on all of 2025-26:
+
+- 3,950 defender appearances — `defensive_contribution == CBIT` on **100.0%**
+- 6,775 midfield and forward appearances — `== CBIRT` on **100.0%**
+
+`fpl/features/defensive.py` computes it and exposes `formula_agreement()` as a
+standing data-quality check. It should be 1.0; anything less means the rule
+changed or the inputs stopped meaning what they meant.
+
+The model therefore stores the three component columns *as well as* the
+published total. Keeping only the total would leave the threshold
+un-recomputable if the rule changes, and keeping only the components would
+remove the check.
+
+Across 2025-26: 12.3% of appearances cleared the threshold, worth 2,834 points.
+
+### BPS — only three-quarters recoverable
+
+The API publishes `bps` as a **total**, never its components. Fitting every
+published stat against it across a full season leaves **24% of its variance
+unexplained**.
+
+| Available and correlated | Not published at all |
+|---|---|
+| minutes, goals, assists, clean sheets, saves | passes completed, key passes |
+| CBI, tackles, recoveries | big chances created / missed |
+| cards, own goals, penalties, goals conceded | errors leading to a goal |
+| | successful dribbles, fouls, offsides |
+
+That 24% is a **ceiling, not a gap to close** — no modelling recovers a
+component nobody publishes. A bonus-points model built on this data is roughly
+three-quarters informed and should be described that way. The figure is
+recorded as `BPS_EXPLAINED_SHARE` so the claim is checkable rather than folklore.
 
 ## Options for managing it
 
