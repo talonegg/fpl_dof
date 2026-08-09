@@ -89,8 +89,10 @@ def render_availability(players: pd.DataFrame) -> None:
 
     display = concerns.assign(
         Fit=(concerns["availability"] * 100).round().astype(int).astype(str) + "%",
+        # "—" covers both "no date published" and "not coming back"; the reason
+        # is what tells those apart, which is why it earns a column of its own.
         Back=concerns["return_date"].dt.strftime("%d %b").fillna("—"),
-        Why=concerns["return_status"],
+        Why=concerns["reason"],
     )
     # Known dates first and soonest first; the unknowns are a separate problem
     # and belong at the end rather than sorted arbitrarily among them.
