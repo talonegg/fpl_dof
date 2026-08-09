@@ -51,6 +51,8 @@ with players_tab:
 
 with scouting_tab:
     st.caption(filters_view.caption(player_filter, len(filtered_players), len(players)))
+    scouting_view.render_availability(filtered_players)
+    st.divider()
     history = load_archive_history()
     scouting_view.render_detail(filtered_players, history, season_label=ARCHIVE_SEASON)
     st.divider()

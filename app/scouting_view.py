@@ -19,6 +19,7 @@ import streamlit as st
 
 from app.theme import MAX_COMPARISON_SERIES, series_colours
 from fpl.domain.history import collapse_to_gameweeks
+from fpl.features.availability import flagged
 from fpl.features.filters import restrict_to_available
 from fpl.features.rates import LOW_MINUTES_THRESHOLD
 
@@ -62,6 +63,33 @@ def _history_for(history: pd.DataFrame, element: int) -> pd.DataFrame:
         return player
 
     return collapse_to_gameweeks(player, ["gameweek"]).sort_values("gameweek")
+
+
+def render_availability(players: pd.DataFrame) -> None:
+    """Who is carrying an injury, suspension or doubt.
+
+    Shown before anything else in the scouting tab: no amount of expected
+    points matters if the player is not going to be on the pitch.
+    """
+    st.subheader("Availability")
+
+    concerns = flagged(players)
+    if concerns.empty:
+        st.caption("No availability concerns among the filtered players.")
+        return
+
+    display = concerns.assign(
+        Fit=(concerns["availability"] * 100).round().astype(int).astype(str) + "%"
+    )
+    columns = {"web_name": "Player", "team_name": "Team", "news": "News"}
+    available = [column for column in columns if column in display.columns]
+
+    st.caption(f"{len(concerns)} player(s) with news. Check before transferring in.")
+    st.dataframe(
+        display[[*available, "Fit"]].rename(columns=columns),
+        width="stretch",
+        hide_index=True,
+    )
 
 
 def _summary_metrics(player: pd.Series) -> None:
