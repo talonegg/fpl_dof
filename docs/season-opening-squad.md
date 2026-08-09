@@ -234,7 +234,9 @@ Both turned "edit the call site and remember the rules" into "add an entry".
 ```python
 class RateEstimator(Protocol):
     """Estimates a per-90 rate for a player from whatever it can see."""
+
     name: str
+
     def estimate(self, player_history: pd.DataFrame) -> pd.Series: ...
     def confidence(self, player_history: pd.DataFrame) -> pd.Series: ...
 ```
@@ -260,10 +262,10 @@ to guess at.
 
 ```python
 ESTIMATORS = {
-    "defensive": BpsResidualDefensive(),      # -> ActualCbitDefensive() in v2
-    "new_player": PriceBandPrior(),           # -> ForeignLeaguePrior() if justified
-    "team_strength": BlendedConcession(),     # -> MarketImpliedStrength() with a key
-    "minutes": PriorSeasonMinutes(),          # -> CapturedMinutes() after a season
+    "defensive": BpsResidualDefensive(),  # -> ActualCbitDefensive() in v2
+    "new_player": PriceBandPrior(),  # -> ForeignLeaguePrior() if justified
+    "team_strength": BlendedConcession(),  # -> MarketImpliedStrength() with a key
+    "minutes": PriorSeasonMinutes(),  # -> CapturedMinutes() after a season
 }
 ```
 
@@ -428,7 +430,53 @@ that this can change without touching the model.
 | Promoted clubs | Prior-based; likely the largest single error source |
 | Five prior improvements did nothing | The base rate for this helping is not high |
 
-## 10. Recommendation
+## 10. First results
+
+Stages 1, 2 and 6 are built. The pipeline was run with a deliberately simple
+expected-points vector, exactly as §10 recommended, and it produced a decisive
+negative result followed by a decisive correction.
+
+**Share of the achievable ceiling, opening ten gameweeks:**
+
+| Strategy | 2024-25 | 2025-26 |
+|---|---|---|
+| Hindsight (ceiling) | 100% | 100% |
+| **BlendedCareer + minutes** | **49.2%** | 45.2% |
+| PriorSeasonPoints (the heuristic) | 46.8% | **54.6%** |
+| Uninformed (floor) | 15.9% | 15.0% |
+| BlendedCareer, no minutes | 31.9% | **11.2%** |
+
+### The finding: rates without minutes are worse than useless
+
+The first version used blended per-90 rates with a constant minutes
+assumption. In 2025-26 it scored **11.2% of the ceiling — below picking a legal
+squad at random**.
+
+The diagnosis was unambiguous. Its fifteen players played **1,121 minutes**
+across the opening run; the naive heuristic's played **10,234**. It bought
+high-rate players who do not play, and spent only £76m of the £100m available.
+
+A per-90 rate says how good a player is *while on the pitch*. Multiplying it by
+a constant treats a 20-minute substitute as a starter. Prior-season totals
+implicitly carry minutes, which is precisely why the unsophisticated heuristic
+beat the sophisticated blend.
+
+Adding a minutes term from career history lifted the same model from 31.9% to
+49.2% in one season and from 11.2% to 45.2% in the other.
+
+### Where that leaves it
+
+**One win, one loss against the obvious heuristic.** Two observations, no
+significance, and the design said in advance that this test can rule a model
+out but cannot establish one. It has not been established.
+
+What it *has* done, for a day's work rather than a week's, is prove the
+pipeline end to end and identify the single largest term before any of the
+sophisticated modelling was written. The clean-sheet, defensive-contribution
+and BPS components described in §3 are all still unbuilt — and the evidence now
+says none of them will matter as much as getting minutes right.
+
+## 11. Recommendation
 
 Build **stages 1, 2 and 6** first — cross-season rates, team strength, and the
 backtest harness — then run the **existing** `ComponentPredictor` through the
