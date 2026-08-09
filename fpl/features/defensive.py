@@ -23,14 +23,9 @@ than trusted, which is what :func:`formula_agreement` is for.
 ## BPS — only partly recoverable
 
 The bonus points system is scored from a much wider set of Opta events than
-the API exposes. Fitting every published stat against the published ``bps``
-across a full season leaves **24% of its variance unexplained** — that residue
-is passes completed, key passes, big chances created and missed, errors
-leading to a goal, dribbles, fouls and offsides, none of which are available.
-
-That is a ceiling, not a gap to close: no amount of modelling recovers a
-component nobody publishes. A BPS or bonus model built on this data should
-expect to be roughly three-quarters informed, and be described that way.
+the API exposes: 16 of its 38 actions are observable here. The official table
+and a reconstruction from it live in :mod:`fpl.domain.bps`, which measures the
+gap directly rather than estimating it.
 """
 
 from __future__ import annotations
@@ -57,22 +52,8 @@ GOALKEEPER = "GK"
 DEFENSIVE_THRESHOLD = {"DEF": 10, "MID": 12, "FWD": 12}
 DEFENSIVE_CONTRIBUTION_POINTS = 2
 
-# Fields the bonus points system uses that the API does not publish. Listed so
-# the gap is explicit rather than a vague "BPS is complicated".
-UNPUBLISHED_BPS_INPUTS = (
-    "passes completed",
-    "key passes",
-    "big chances created",
-    "big chances missed",
-    "errors leading to a goal",
-    "successful dribbles",
-    "fouls conceded",
-    "offsides",
-    "shots on target",
-)
-
-# Measured on 2025-26: the share of BPS variance the published fields explain.
-BPS_EXPLAINED_SHARE = 0.76
+# The BPS table and the measured size of the gap now live in fpl/domain/bps.py,
+# built from the official published values rather than fitted coefficients.
 
 
 def defensive_actions(appearances: pd.DataFrame) -> pd.Series:

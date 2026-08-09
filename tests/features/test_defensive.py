@@ -11,9 +11,7 @@ import pandas as pd
 import pytest
 
 from fpl.features.defensive import (
-    BPS_EXPLAINED_SHARE,
     DEFENSIVE_THRESHOLD,
-    UNPUBLISHED_BPS_INPUTS,
     add_defensive_metrics,
     clears_threshold,
     defensive_actions,
@@ -151,19 +149,6 @@ def test_missing_component_columns_do_not_raise():
 def test_empty_input_is_safe():
     assert defensive_actions(pd.DataFrame()).empty
     assert add_defensive_metrics(pd.DataFrame()).empty
-
-
-# --- What BPS cannot tell us ---
-
-
-def test_the_unpublished_bps_inputs_are_named():
-    """A vague "BPS is complicated" is not a usable statement of the gap."""
-    assert "key passes" in UNPUBLISHED_BPS_INPUTS
-    assert "errors leading to a goal" in UNPUBLISHED_BPS_INPUTS
-
-
-def test_the_explained_share_of_bps_is_recorded_as_a_ceiling():
-    assert 0.7 <= BPS_EXPLAINED_SHARE <= 0.8
 
 
 # --- Against the real archive ---

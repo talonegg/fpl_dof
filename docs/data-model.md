@@ -255,23 +255,49 @@ remove the check.
 
 Across 2025-26: 12.3% of appearances cleared the threshold, worth 2,834 points.
 
-### BPS — only three-quarters recoverable
+### BPS — 16 of 38 actions observable
 
-The API publishes `bps` as a **total**, never its components. Fitting every
-published stat against it across a full season leaves **24% of its variance
-unexplained**.
+The API publishes `bps` as a **total**, never its components. The official
+table (Premier League, 2025-26) has 38 scoring actions; the API gives us the
+inputs for 16. `fpl/domain/bps.py` records all 38 — including the ones we
+cannot see, because knowing that a big chance created is worth 3 tells you
+*which kind of player* this project will systematically under-rate.
 
-| Available and correlated | Not published at all |
+| Observable (16) | Not published (22) |
 |---|---|
-| minutes, goals, assists, clean sheets, saves | passes completed, key passes |
-| CBI, tackles, recoveries | big chances created / missed |
-| cards, own goals, penalties, goals conceded | errors leading to a goal |
-| | successful dribbles, fouls, offsides |
+| appearance 3 / 6 | key pass 1, big chance created 3 |
+| goal 12 / 18 / 24 by position | successful cross 1, dribble 1 |
+| assist 9, clean sheet 12 | shot on target 2, off target −1 |
+| penalty save 8, tackle 2 | pass completion 2 / 4 / 6 |
+| CBI 1 per 2, recoveries 1 per 3 | goalline clearance 9, foul won 1 |
+| goal conceded −4, cards −3 / −9 | big chance missed −3, error −3 / −1 |
+| own goal −6, missed penalty −6 | conceded penalty −3, offside −1 |
 
-That 24% is a **ceiling, not a gap to close** — no modelling recovers a
-component nobody publishes. A bonus-points model built on this data is roughly
-three-quarters informed and should be described that way. The figure is
-recorded as `BPS_EXPLAINED_SHARE` so the claim is checkable rather than folklore.
+`reconstruct()` applies the **official coefficients** to the available inputs —
+deliberately unfitted, so what is left over measures the missing data rather
+than a model's inability. Measured on 2025-26:
+
+| | |
+|---|---|
+| Correlation with published BPS | **0.908** |
+| Share of total BPS accounted for | **87.0%** |
+| R² (unfitted) | **0.805** |
+| Median per-appearance gap | +1 |
+
+Notably the unfitted reconstruction beats a fitted regression on the same
+columns (R² 0.805 against 0.761). The published rules are exact, and fitting
+throws away structure the rules encode — per-2 integer division on clearances,
+the position-dependent goal values.
+
+The reconstruction under-counts in 52% of appearances, as expected: the
+unobservable actions are overwhelmingly positive. It also *over*-counts
+occasionally, which is informative — penalties now score 12 for every position
+while the API reports only `goals_scored`, so a midfielder's penalty is
+credited 18 instead of 12. That is the "no penalty/open-play split" limitation
+showing up as a number.
+
+**This is a ceiling, not a gap to close.** A bonus model built on this data
+sees about seven-eighths of BPS and should be described that way.
 
 ## Options for managing it
 
