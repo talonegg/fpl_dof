@@ -342,6 +342,58 @@ a third-party mirror that could stop being maintained at any time. It costs
 about 5 MB a season — 41 KB/day to 56 KB/day — to stop depending on it for the
 most important data in the project.
 
+## Penalties: sources reviewed
+
+A penalty is the closest thing to a free goal in football and it accrues to
+one player per team, which makes penalty duty unusually valuable — and
+unusually badly served by the data.
+
+| Source | Penalties scored | Designated taker | Usable | robots.txt |
+|---|---|---|---|---|
+| FPL API | **no** | `penalties_order` | yes, **live only** | n/a |
+| community archive | no — misses and saves only | no | partly | n/a |
+| **myfootballfacts.com** | **yes, per player** | no | **permitted, unused** | `Allow: /` |
+| theanalyst.com (Opta) | aggregate articles only | no | permitted | `Allow: /` |
+| FBref | yes — PK, PKatt, npxG | no | **no** | 403 Cloudflare |
+| Understat | yes — npxG | no | **no** | `Disallow: /` |
+
+**Nobody this project can currently read publishes penalties scored.**
+`goals_scored` includes them and `expected_goals` includes penalty xG, so a
+taker's underlying numbers are inflated in a way that cannot be separated out.
+That is also the largest known distortion in the BPS reconstruction: penalties
+score 12 BPS for every position, but a midfielder's is credited 18 because only
+the goal is visible.
+
+`myfootballfacts.com` is the one permitted source that publishes per-player
+penalties. It is recorded here rather than used — one more scraper is a cost,
+and the daily captures may make it unnecessary.
+
+### Why the taker probability is assumed, not measured
+
+The obvious empirical route is to look at who has missed penalties and read off
+their `penalties_order`. It does not work: `penalties_order` is **live-only and
+never archived**, so today's order describes *this* season while
+`penalties_missed` describes *last* one. Comparing them measures squad churn.
+
+The daily captures now record `penalties_order`, so a season of them makes this
+estimable for the first time. Until then the shares live in one constant so
+replacing assumption with measurement is a one-line change.
+
+### Base rates, and a check on them
+
+Published: ~**0.25 penalties scored per match** (2023/24), conversion 89.7% that
+season and **81.9% across 2020/21–2023/24**.
+
+Checked against this project's own data: 2025-26 recorded 15 missed and 11
+saved, so 26 failures. With 0.25 scored per match over 380 matches that implies
+**~121 attempts, 78.5% conversion, 0.32 penalties awarded per match** — inside
+the published range, which is as much validation as is available without a feed
+that publishes attempts.
+
+The estimate is sensitive to the assumed conversion, which is the honest
+caveat: at 89.7% the same 26 failures would imply 252 attempts, which is
+implausible.
+
 ## Options for managing it
 
 Measured, not guessed: four seasons of archive is ~45 MB in memory and ~12 MB
