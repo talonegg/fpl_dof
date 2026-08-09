@@ -15,7 +15,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fpl.sources.fpl_api import fetch_bootstrap, fetch_fixtures  # noqa: E402
-from fpl.sources.snapshot import write_snapshot  # noqa: E402
+from fpl.sources.snapshot import (  # noqa: E402
+    captured_dates,
+    write_daily_signals,
+    write_snapshot,
+)
 
 
 def main() -> int:
@@ -40,6 +44,15 @@ def main() -> int:
 
     for name, path in paths.items():
         print(f"wrote {name}: {path}")
+
+    # The append-only daily capture. Separate from the gameweek snapshot
+    # because it must never overwrite an earlier day.
+    daily = write_daily_signals(bootstrap, root=args.root)
+    if daily is None:
+        print("daily signals already captured for today; left untouched")
+    else:
+        print(f"wrote daily signals: {daily}")
+    print(f"daily captures held: {len(captured_dates(args.root))}")
     return 0
 
 

@@ -9,12 +9,24 @@ have known.
 Snapshotting on a schedule is the cheap fix: capture the state, stamp it with
 the gameweek it belongs to, and keep it. The files are the raw material for
 honest point-in-time backtests later.
+
+Two different captures, on purpose:
+
+**Per gameweek** (:func:`write_snapshot`) overwrites, converging on the state
+just before each deadline. That is what a point-in-time backtest replays.
+
+**Per day** (:func:`write_daily_signals`) appends, one file per date, and never
+rewrites an existing one. This is the only record that will ever exist of the
+live-only signals — injury status, set-piece duty, price, ownership — because
+none of them appear in the historical archive. A daily file is 28KB, about
+10MB a season; the full player table would be seven times that for columns
+that do not change.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +34,99 @@ import pandas as pd
 
 from fpl.domain.fixtures import build_team_schedule, next_gameweek
 from fpl.domain.players import build_players_frame
+
+# The fields worth keeping every day: the ones that change, and that no
+# historical source records. Everything omitted is either static (name, team)
+# or recoverable from the archive after the season (goals, minutes).
+DAILY_SIGNAL_COLUMNS = (
+    # Identity. `code` is the stable cross-season id; `element` is not.
+    "element",
+    "code",
+    "web_name",
+    "team",
+    "element_type",
+    # Availability — the whole reason this capture exists.
+    "status",
+    "chance_of_playing_this_round",
+    "chance_of_playing_next_round",
+    "news",
+    "news_added",
+    # Set-piece duty, which changes during a season and is never archived.
+    "penalties_order",
+    "corners_and_indirect_freekicks_order",
+    "direct_freekicks_order",
+    # Price and market state. Prices move daily and the archive keeps only the
+    # value at the moment a gameweek was played.
+    "now_cost",
+    "cost_change_event",
+    "selected_by_percent",
+    "transfers_in_event",
+    "transfers_out_event",
+    # Cheap context for interpreting the above.
+    "form",
+    "total_points",
+    "minutes",
+)
+
+DAILY_DIRECTORY = "daily"
+
+
+def daily_path(root: Path, captured_on: date) -> Path:
+    """Path of the append-only capture for a single day."""
+    return Path(root) / DAILY_DIRECTORY / f"{captured_on.isoformat()}.parquet"
+
+
+def write_daily_signals(
+    bootstrap: dict[str, Any],
+    root: Path,
+    captured_on: date | None = None,
+    overwrite: bool = False,
+) -> Path | None:
+    """Append today's live-only signals, or return ``None`` if already captured.
+
+    Refuses to overwrite an existing day by default. These files are the only
+    record of what was true on a given date, and a re-run later in the day
+    would quietly replace the morning's injury news with the evening's —
+    destroying exactly the point-in-time property the capture exists for.
+    """
+    captured_on = captured_on or datetime.now(UTC).date()
+    path = daily_path(root, captured_on)
+
+    if path.exists() and not overwrite:
+        return None
+
+    players = build_players_frame(bootstrap)
+    columns = [column for column in DAILY_SIGNAL_COLUMNS if column in players.columns]
+    daily = players[columns].copy()
+    daily["captured_on"] = captured_on.isoformat()
+    daily["gameweek"] = next_gameweek(bootstrap.get("events", []))
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    daily.to_parquet(path, index=False)
+    return path
+
+
+def read_daily_signals(root: Path) -> pd.DataFrame:
+    """Every daily capture, concatenated, oldest first.
+
+    The frame a future evaluation of any live-only signal will start from.
+    """
+    directory = Path(root) / DAILY_DIRECTORY
+    if not directory.exists():
+        return pd.DataFrame()
+
+    frames = [pd.read_parquet(path) for path in sorted(directory.glob("*.parquet"))]
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
+def captured_dates(root: Path) -> list[str]:
+    """Dates that have a daily capture, ascending."""
+    directory = Path(root) / DAILY_DIRECTORY
+    if not directory.exists():
+        return []
+    return sorted(path.stem for path in directory.glob("*.parquet"))
 
 
 def snapshot_directory(root: Path, gameweek: int) -> Path:
