@@ -19,6 +19,25 @@ prerequisite has not landed is marked, because the ordering is not arbitrary.
 - **A new external source**: implement `Source`, and a failure degrades that
   panel rather than the app.
 
+## Season-opening squad recommendation
+
+Designed in `docs/season-opening-squad.md`, with data feasibility verified
+rather than assumed. Not yet built.
+
+The recommended first move is deliberately unambitious: build cross-season rate
+aggregation, team defensive strength, and the backtest harness, then run the
+*existing* component model through it. That tests the pipeline against a known
+quantity before any new modelling exists — and if it cannot beat the template
+squad, the sophisticated version will not either.
+
+Two constraints found while designing it:
+
+- **Defensive contribution inputs exist for one season only.** CBI, tackles and
+  recoveries arrived with the rule in 2025-26, so the requested multi-season
+  weighting is impossible for that component until 2026-27 completes.
+- **Only three seasons are backtestable**, giving three squads. The backtest can
+  rule out a bad model; it cannot establish a good one.
+
 ## Tier 1 — do these next
 
 ### 1. Responsive pass at 375px
