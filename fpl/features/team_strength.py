@@ -32,6 +32,39 @@ FULL_APPEARANCE_MINUTES = 60
 # the archive rather than assumed; see estimate_promoted_prior().
 DEFAULT_PROMOTED_XGC = 1.75
 
+# Fixture weighting across the opening run: a flat plateau over the gameweeks
+# you are certain to hold the squad for, then a decay across the ones you are
+# not. Three at full weight, then four diminishing, then nothing.
+#
+# Lives here rather than in the predictor because two consumers must agree on
+# it. The predictor's weights are a uniform scalar and cannot change which
+# players it prefers; opening_run_difficulty's weights decide *which opponents
+# count*, and that does. Two curves would mean the shape being asked for
+# applied to only one of them.
+PLATEAU_GAMEWEEKS = 3
+DEFAULT_FIXTURE_DECAY = 0.7
+DEFAULT_HORIZON = 7
+
+
+def fixture_weights(
+    horizon: int = DEFAULT_HORIZON,
+    decay: float = DEFAULT_FIXTURE_DECAY,
+    plateau: int = PLATEAU_GAMEWEEKS,
+) -> list[float]:
+    """Weight per gameweek of the opening run: flat, then diminishing, then off.
+
+    The opening three gameweeks are the ones the squad is actually held for —
+    a free transfer a week means gameweek 8 will be re-decided with better
+    information than exists now — so they carry full weight rather than a decay
+    that already discounts gameweek 3 to 0.6.
+
+    Gameweeks 4 to 7 decay geometrically: a fixture you will probably still be
+    holding these players for, weighted below one you certainly will.
+
+    With the defaults: ``[1.0, 1.0, 1.0, 0.70, 0.49, 0.34, 0.24]``.
+    """
+    return [1.0 if index < plateau else decay ** (index - plateau + 1) for index in range(horizon)]
+
 
 def team_match_defence(season: pd.DataFrame) -> pd.DataFrame:
     """One row per club per gameweek: goals and expected goals conceded.
@@ -253,15 +286,17 @@ def opponent_names(season: pd.DataFrame) -> pd.DataFrame:
 def opening_run_difficulty(
     season: pd.DataFrame,
     attack: pd.DataFrame,
-    horizon: int = 10,
-    decay: float = 0.78,
+    horizon: int = DEFAULT_HORIZON,
+    decay: float = DEFAULT_FIXTURE_DECAY,
+    plateau: int = PLATEAU_GAMEWEEKS,
 ) -> pd.DataFrame:
     """How kind each club's opening fixtures are, weighted towards the near ones.
 
     Returns a multiplier centred on 1.0: above 1 means an easier-than-average
-    start. Gameweek 1 carries full weight and gameweek 10 about a tenth, which
-    is the shape the requirement asks for — the opening fixtures decide the
-    opening squad, and gameweek 11 onwards should not.
+    start. Weighted by :func:`fixture_weights` — the opening three gameweeks
+    flat at full weight, four to seven diminishing, nothing after — so the
+    opponents a squad is certainly held against count for more than the ones it
+    probably is not.
 
     Difficulty is the opponent's *attacking* strength: the goals a club
     concedes to an average side, taken from ``attack`` keyed by club name.
@@ -282,7 +317,11 @@ def opening_run_difficulty(
 
     # An opponent who concedes a lot is an easy fixture.
     window["opponent_leakiness"] = window["opponent_name"].map(strength).fillna(league_mean)
-    window["weight"] = decay ** (window["gameweek"] - 1)
+
+    curve = fixture_weights(horizon, decay, plateau)
+    window["weight"] = window["gameweek"].map(
+        {gameweek: curve[gameweek - 1] for gameweek in range(1, horizon + 1)}
+    )
 
     rows = []
     for club, group in window.groupby("team_name"):

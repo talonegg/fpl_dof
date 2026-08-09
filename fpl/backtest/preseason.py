@@ -1,4 +1,4 @@
-"""Picking a squad before a season starts, and finding out how it did.
+"""Replaying season-opening squad selection against what actually happened.
 
 The test the whole season-opening design rests on. For a season S, build a
 squad using **only seasons before S** and S's own opening prices, then score
@@ -8,14 +8,16 @@ Possible at all because the archive records a price for every player in
 gameweek 1 of every season, which is the real budget they had to be bought
 within.
 
-**Three seasons are testable, so this yields three squads.** That is a very
-small sample and no amount of statistics rescues it. This can show that a
+This module now only *replays*. Pool assembly lives in
+``features/preseason_pool.py``, the analytical models in
+``models/preseason_strategies.py``, and squad construction in
+``optimise/preseason.py`` — so a strategy can be added, or the constructor
+changed, without touching the harness that scores them.
+
+**Three seasons are testable, so each strategy yields three squads.** That is a
+very small sample and no amount of statistics rescues it. This can show that a
 model is bad; it cannot show that one is good. Read a positive result as
 permission to proceed, not as evidence of skill.
-
-Benchmarks matter more than the score for that reason. "Our squad scored 620"
-means nothing on its own; "620 against a template's 585 and a hindsight-perfect
-760" is a result.
 """
 
 from __future__ import annotations
@@ -24,19 +26,38 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from fpl.domain.identity import add_match_key
-from fpl.domain.positions import display_name
-from fpl.features.career import blend_career_rates, shrink_towards_prior
-from fpl.features.team_strength import (
-    blend_team_defence,
-    estimate_promoted_prior,
-    opening_run_difficulty,
+from fpl.domain.rules import season_scores_defensive_contributions
+from fpl.features.preseason_pool import OPENING_GAMEWEEK, build_pool, opening_prices
+from fpl.models.preseason_strategies import (
+    PreseasonContext,
+    PreseasonStrategy,
+    strategies,
 )
-from fpl.models.preseason import PreseasonPredictor
-from fpl.optimise.squad import InfeasibleSquad, SquadConstraints, optimise_squad
+from fpl.optimise.preseason import construct_squad
+from fpl.optimise.squad import SquadConstraints
 
-OPENING_GAMEWEEK = 1
-DEFAULT_HORIZON = 10
+# The windows the opening squad is actually judged over. Three is what you are
+# certain to hold it for, seven is roughly where a free transfer a week has
+# rebuilt it, and five is the middle. Scoring at one horizon hides whether an
+# edge is real or just early.
+SCORING_HORIZONS = (3, 5, 7)
+DEFAULT_HORIZON = 7
+
+__all__ = [
+    "DEFAULT_HORIZON",
+    "OPENING_GAMEWEEK",
+    "SCORING_HORIZONS",
+    "PreseasonResult",
+    "actual_points",
+    "build_pool",
+    "compare_horizons",
+    "compare_strategies",
+    "defensive_forecast_status",
+    "hindsight_squad",
+    "horizon_table",
+    "opening_prices",
+    "run_strategy",
+]
 
 
 @dataclass
@@ -49,6 +70,7 @@ class PreseasonResult:
     opening_points: float
     season_points: float
     cost: float
+    defensive: str = ""
 
     def summary(self) -> str:
         return (
@@ -56,34 +78,6 @@ class PreseasonResult:
             f"opening run, {self.season_points:.0f} across the season, "
             f"£{self.cost:.1f}m spent"
         )
-
-
-def opening_prices(season: pd.DataFrame) -> pd.DataFrame:
-    """Each player's price, club and position at gameweek 1.
-
-    The budget that actually applied. Using end-of-season prices would let a
-    model buy a player who rose from £4.5m to £7m for the price he ended at,
-    which is a form of hindsight.
-    """
-    if season.empty:
-        return pd.DataFrame()
-
-    opening = season[season["gameweek"] == OPENING_GAMEWEEK]
-    if opening.empty:
-        return pd.DataFrame()
-
-    columns = [
-        column
-        for column in ("element", "player_name", "position", "team_name", "price")
-        if column in opening.columns
-    ]
-    prices = opening[columns].drop_duplicates(subset="element").copy()
-    if "position" in prices.columns:
-        # The optimiser keys on the long names in domain/rules.py; the archive
-        # uses short codes. Translate towards the rules, not away from them.
-        prices["position"] = prices["position"].map(display_name)
-    prices["team"] = prices["team_name"]
-    return add_match_key(prices, "player_name")
 
 
 def actual_points(
@@ -103,186 +97,67 @@ def actual_points(
     return float(opening), float(owned["total_points"].sum())
 
 
-def build_pool(prior_seasons: dict[str, pd.DataFrame], prices: pd.DataFrame) -> pd.DataFrame:
-    """Join blended career rates onto the opening prices.
+def defensive_forecast_status(target: str, pool: pd.DataFrame) -> str:
+    """Whether defensive contributions can be forecast for ``target``.
 
-    Players with no prior history keep a null rate rather than a guessed one —
-    the caller decides. That is 15% of the list on real data, and inventing
-    numbers for them here would hide the gap the design is explicit about.
+    Three genuinely different states, and collapsing them is how a backtest
+    comes to report a number that means nothing:
+
+    ``"not scored"``     the season predates the rule. Scoring none is correct.
+    ``"forecast"``       the rule applies and prior seasons carry the data.
+    ``"blind"``          the rule applies and prior seasons do **not** carry the
+                         data. The squad is being judged against points it had
+                         no way to see coming.
     """
-    if prices.empty:
-        return pd.DataFrame()
-
-    career = blend_career_rates(prior_seasons)
-    if career.empty:
-        return pd.DataFrame()
-
-    career = shrink_towards_prior(career)
-    # Carry every career column, not a chosen subset. A component model needs
-    # the underlying rates and the appearance counts, and picking columns here
-    # silently starved the minutes forecaster of its inputs.
-    drop = [column for column in ("player_name", "last_club") if column in career.columns]
-    return prices.merge(career.drop(columns=drop), on="match_key", how="left")
-
-
-def expected_points_from_history(
-    pool: pd.DataFrame, horizon: int = DEFAULT_HORIZON, minutes_prior: float = 60.0
-) -> pd.Series:
-    """Points expected over the opening run, from blended history alone.
-
-    Deliberately the simplest thing that could work: a per-90 rate times an
-    assumed minutes share times the horizon. It exists to test the *pipeline*
-    before any real model does, so that a failure can be attributed to the
-    plumbing rather than to the modelling.
-    """
-    if pool.empty:
-        return pd.Series(dtype="float64")
-
-    rate = pool.get("total_points_per_90")
-    if rate is None:
-        return pd.Series(0.0, index=pool.index)
-
-    return (rate.fillna(0.0) * minutes_prior / 90.0 * horizon).clip(lower=0)
-
-
-def expected_points_with_minutes(
-    pool: pd.DataFrame, horizon: int = DEFAULT_HORIZON, gameweeks_per_season: int = 38
-) -> pd.Series:
-    """Points expected over the opening run, using a minutes forecast.
-
-    The correction to :func:`expected_points_from_history`, which assumed every
-    player would play the same 60 minutes. Measured on 2025-26 that assumption
-    was catastrophic: it bought a squad that played 1,121 minutes across the
-    opening run where the obvious heuristic's squad played 10,234, and scored
-    11% of the achievable ceiling against that heuristic's 55%.
-
-    A per-90 rate says how good a player is *while on the pitch*. Multiplying it
-    by a constant treats a 20-minute substitute as a starter. Prior-season
-    totals implicitly carry minutes, which is exactly why the naive heuristic
-    beat the sophisticated blend.
-
-    Expected minutes here come from history: total minutes over the seasons
-    seen, divided by the gameweeks those seasons contained.
-    """
-    if pool.empty:
-        return pd.Series(dtype="float64")
-
-    rate = pool.get("total_points_per_90")
-    if rate is None:
-        return pd.Series(0.0, index=pool.index)
-
-    seasons = pool.get("seasons_seen")
-    minutes = pool.get("career_minutes")
-    if minutes is None:
-        return expected_points_from_history(pool, horizon)
-
-    span = (seasons.fillna(1).clip(lower=1) if seasons is not None else 1) * gameweeks_per_season
-    minutes_per_gameweek = (minutes.fillna(0) / span).clip(0, 90)
-
-    return (rate.fillna(0.0) * minutes_per_gameweek / 90.0 * horizon).clip(lower=0)
-
-
-def expected_points_from_components(
-    pool: pd.DataFrame,
-    prior_seasons: dict[str, pd.DataFrame],
-    horizon: int = DEFAULT_HORIZON,
-    use_fixtures: bool = False,
-) -> pd.Series:
-    """Points expected over the opening run from the component model.
-
-    The full stack the design asks for: blended career rates, a pre-season
-    minutes forecast, and clean sheets taken from the club the player will play
-    for next season rather than from their own history.
-
-    ``use_fixtures`` applies opening-run difficulty. It is **off by default
-    because it measured worse in both testable seasons** — see §10. The
-    parameter stays so the question can be reopened against a third season.
-    """
-    if pool.empty:
-        return pd.Series(dtype="float64")
-
-    defence = blend_team_defence(prior_seasons)
-    model = PreseasonPredictor(
-        horizon=horizon,
-        team_defence=defence,
-        promoted_prior=estimate_promoted_prior(prior_seasons),
-    )
-
-    difficulty = None
-    if use_fixtures and prior_seasons:
-        latest = prior_seasons[max(prior_seasons)]
-        ratings = opening_run_difficulty(latest, defence, horizon=horizon)
-        if not ratings.empty:
-            lookup = ratings.set_index("team_name")["opening_difficulty"]
-            difficulty = pool["team"].map(lookup).fillna(1.0)
-
-    predictions = model.predict(pool, fixture_difficulty=difficulty)
-    if predictions.empty:
-        return pd.Series(0.0, index=pool.index)
-
-    return pd.Series(predictions["expected_points"].to_numpy(), index=pool.index)
-
-
-def pick_squad(
-    pool: pd.DataFrame, expected: pd.Series, constraints: SquadConstraints | None = None
-) -> pd.DataFrame | None:
-    """Optimise a squad from a priced pool and an expected-points vector."""
-    if pool.empty:
-        return None
-
-    candidates = pool.assign(expected_points=expected).dropna(
-        subset=["price", "position", "team", "expected_points"]
-    )
-    if candidates.empty:
-        return None
-
-    try:
-        squad = optimise_squad(candidates, constraints)
-    except InfeasibleSquad:
-        return None
-    return squad.players
+    if not season_scores_defensive_contributions(target):
+        return "not scored"
+    if "defensive_rate" in pool.columns and pool["defensive_rate"].notna().any():
+        return "forecast"
+    return "blind"
 
 
 def run_strategy(
-    season_name: str,
+    target: str,
     season: pd.DataFrame,
     prior_seasons: dict[str, pd.DataFrame],
-    strategy: str,
-    expected: pd.Series | None = None,
+    strategy: PreseasonStrategy,
     horizon: int = DEFAULT_HORIZON,
+    constraints: SquadConstraints | None = None,
+    pool: pd.DataFrame | None = None,
 ) -> PreseasonResult | None:
-    """Build a squad for ``season_name`` and score it."""
-    prices = opening_prices(season)
-    pool = build_pool(prior_seasons, prices)
-    if pool.empty:
+    """Build a squad for ``target`` with one strategy, and score it."""
+    candidates = build_pool(prior_seasons, opening_prices(season)) if pool is None else pool
+    if candidates.empty:
         return None
 
-    vector = expected if expected is not None else expected_points_from_history(pool, horizon)
-    squad = pick_squad(pool, vector)
+    context = PreseasonContext(target=target, prior_seasons=prior_seasons, horizon=horizon)
+    squad = construct_squad(candidates, strategy.expected_points(candidates, context), constraints)
     if squad is None:
         return None
 
-    opening, whole = actual_points(season, squad["element"].tolist(), horizon)
+    players = squad.players
+    opening, whole = actual_points(season, players["element"].tolist(), horizon)
     return PreseasonResult(
-        season=season_name,
-        strategy=strategy,
-        squad=squad,
+        season=target,
+        strategy=strategy.name,
+        squad=players,
         opening_points=opening,
         season_points=whole,
-        cost=float(squad["price"].sum()),
+        cost=float(players["price"].sum()),
+        defensive=defensive_forecast_status(target, candidates),
     )
 
 
-# -- Benchmarks -----------------------------------------------------------
-
-
 def hindsight_squad(
-    season_name: str, season: pd.DataFrame, horizon: int = DEFAULT_HORIZON
+    target: str, season: pd.DataFrame, horizon: int = DEFAULT_HORIZON
 ) -> PreseasonResult | None:
     """The best squad it was possible to buy, knowing everything. The ceiling.
 
     Reported because a score without a ceiling is uninterpretable. Nobody can
     reach this; the useful number is the share of it a strategy captures.
+
+    Not a strategy in the registry, deliberately — it reads the target season,
+    which every real strategy is forbidden from doing.
     """
     prices = opening_prices(season)
     if prices.empty:
@@ -296,72 +171,24 @@ def hindsight_squad(
     pool = prices.merge(scored, on="element", how="left")
     pool["total_points"] = pool["total_points"].fillna(0)
 
-    squad = pick_squad(pool, pool["total_points"])
+    squad = construct_squad(pool, pool["total_points"])
     if squad is None:
         return None
 
-    opening, whole = actual_points(season, squad["element"].tolist(), horizon)
+    players = squad.players
+    opening, whole = actual_points(season, players["element"].tolist(), horizon)
     return PreseasonResult(
-        season_name, "Hindsight", squad, opening, whole, float(squad["price"].sum())
-    )
-
-
-def cheapest_squad(
-    season_name: str, season: pd.DataFrame, horizon: int = DEFAULT_HORIZON
-) -> PreseasonResult | None:
-    """A legal squad chosen with no information at all. The floor."""
-    prices = opening_prices(season)
-    if prices.empty:
-        return None
-
-    # Every player equally good: the optimiser returns a legal squad, nothing more.
-    squad = pick_squad(prices, pd.Series(1.0, index=prices.index))
-    if squad is None:
-        return None
-
-    opening, whole = actual_points(season, squad["element"].tolist(), horizon)
-    return PreseasonResult(
-        season_name, "Uninformed", squad, opening, whole, float(squad["price"].sum())
-    )
-
-
-def prior_points_squad(
-    season_name: str,
-    season: pd.DataFrame,
-    prior_seasons: dict[str, pd.DataFrame],
-    horizon: int = DEFAULT_HORIZON,
-) -> PreseasonResult | None:
-    """Buy last season's highest scorers within budget. The obvious heuristic.
-
-    This is what a person does without a model, so it is the benchmark that
-    actually matters: beating it is the minimum bar for the work being worth
-    anything.
-    """
-    prices = opening_prices(season)
-    if prices.empty or not prior_seasons:
-        return None
-
-    latest = max(prior_seasons)
-    totals = prior_seasons[latest].groupby("player_name", as_index=False)["total_points"].sum()
-    totals = add_match_key(totals, "player_name")
-
-    pool = prices.merge(totals[["match_key", "total_points"]], on="match_key", how="left")
-    pool["total_points"] = pool["total_points"].fillna(0)
-
-    squad = pick_squad(pool, pool["total_points"])
-    if squad is None:
-        return None
-
-    opening, whole = actual_points(season, squad["element"].tolist(), horizon)
-    return PreseasonResult(
-        season_name, "PriorSeasonPoints", squad, opening, whole, float(squad["price"].sum())
+        target, "Hindsight", players, opening, whole, float(players["price"].sum())
     )
 
 
 def compare_strategies(
-    season_data: dict[str, pd.DataFrame], target: str, horizon: int = DEFAULT_HORIZON
+    season_data: dict[str, pd.DataFrame],
+    target: str,
+    horizon: int = DEFAULT_HORIZON,
+    catalogue: list[PreseasonStrategy] | None = None,
 ) -> pd.DataFrame:
-    """Every strategy and benchmark for one season, best opening run first."""
+    """Every registered strategy plus the ceiling, for one season and horizon."""
     if target not in season_data:
         return pd.DataFrame()
 
@@ -370,38 +197,17 @@ def compare_strategies(
     if not prior:
         return pd.DataFrame()
 
+    # Built once and shared: assembling it per strategy repeated the most
+    # expensive step in the run for no benefit.
     pool = build_pool(prior, opening_prices(season))
+    if pool.empty:
+        return pd.DataFrame()
 
     results = [
-        run_strategy(target, season, prior, "BlendedCareer", horizon=horizon),
-        run_strategy(
-            target,
-            season,
-            prior,
-            "BlendedCareer+Minutes",
-            expected=expected_points_with_minutes(pool, horizon),
-            horizon=horizon,
-        ),
-        run_strategy(
-            target,
-            season,
-            prior,
-            "Components",
-            expected=expected_points_from_components(pool, prior, horizon),
-            horizon=horizon,
-        ),
-        run_strategy(
-            target,
-            season,
-            prior,
-            "Components+Fixtures",
-            expected=expected_points_from_components(pool, prior, horizon, use_fixtures=True),
-            horizon=horizon,
-        ),
-        prior_points_squad(target, season, prior, horizon),
-        cheapest_squad(target, season, horizon),
-        hindsight_squad(target, season, horizon),
+        run_strategy(target, season, prior, strategy, horizon, pool=pool)
+        for strategy in (catalogue or strategies())
     ]
+    results.append(hindsight_squad(target, season, horizon))
 
     rows = [
         {
@@ -422,4 +228,52 @@ def compare_strategies(
     ceiling = frame[frame["strategy"] == "Hindsight"]["opening_points"]
     if not ceiling.empty and ceiling.iloc[0] > 0:
         frame["share_of_ceiling"] = frame["opening_points"] / ceiling.iloc[0]
+
+    # Carried on every row so a reader cannot see the score without seeing
+    # whether the model could account for defensive contributions at all.
+    frame["defensive"] = defensive_forecast_status(target, pool)
     return frame.reset_index(drop=True)
+
+
+def compare_horizons(
+    season_data: dict[str, pd.DataFrame],
+    targets: tuple[str, ...] | None = None,
+    horizons: tuple[int, ...] = SCORING_HORIZONS,
+    catalogue: list[PreseasonStrategy] | None = None,
+) -> pd.DataFrame:
+    """Every strategy, season and horizon in one frame.
+
+    The opening squad is scored over three, five and seven gameweeks rather
+    than a single window. A model that looks good only at three gameweeks has
+    found something that decays; one that only looks good at seven has not
+    helped with the part of the season the squad was actually chosen for.
+
+    Returns one row per season, horizon and strategy, carrying the share of
+    that horizon's own achievable ceiling. Shares are comparable across
+    horizons; raw points are not, since a seven-gameweek total is larger for
+    reasons that have nothing to do with skill.
+    """
+    seasons = targets or tuple(sorted(season_data)[1:])
+
+    frames = []
+    for horizon in horizons:
+        for target in seasons:
+            frame = compare_strategies(season_data, target, horizon, catalogue)
+            if frame.empty:
+                continue
+            frames.append(frame.assign(horizon=horizon))
+
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
+def horizon_table(comparison: pd.DataFrame) -> pd.DataFrame:
+    """Strategies down, horizons across, mean share of ceiling in the cells."""
+    if comparison.empty or "share_of_ceiling" not in comparison.columns:
+        return pd.DataFrame()
+
+    table = comparison.pivot_table(
+        index="strategy", columns="horizon", values="share_of_ceiling", aggfunc="mean"
+    )
+    return table.sort_values(table.columns[-1], ascending=False)

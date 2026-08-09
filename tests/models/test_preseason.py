@@ -5,11 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from fpl.models.preseason import (
-    DEFAULT_HORIZON,
-    PreseasonPredictor,
-    fixture_weights,
-)
+from fpl.models.preseason import DEFAULT_HORIZON, PreseasonPredictor
 
 
 def career(position="MID", minutes=3000, appearances=34, seasons=2, **rates):
@@ -31,23 +27,6 @@ DEFENCE = pd.DataFrame(
         {"team_name": "Burnley", "expected_goals_conceded_per_match": 2.0},
     ]
 )
-
-
-def test_the_near_fixtures_carry_the_most_weight():
-    weights = fixture_weights()
-
-    assert weights[0] > weights[1] > weights[-1]
-
-
-def test_gameweek_ten_is_immaterial_next_to_gameweek_one():
-    """The requirement: after ten, no influence on the opening squad."""
-    weights = fixture_weights()
-
-    assert weights[9] < 0.12 * weights[0]
-
-
-def test_the_horizon_truncates_hard():
-    assert len(fixture_weights(horizon=10)) == 10
 
 
 def test_a_regular_starter_scores_more_than_a_bit_part_player():
@@ -134,7 +113,7 @@ def test_an_empty_career_gives_no_predictions():
     assert PreseasonPredictor().predict(pd.DataFrame()).empty
 
 
-def test_a_horizon_of_ten_is_the_default():
+def test_the_default_horizon_is_the_shared_one():
     assert PreseasonPredictor().horizon == DEFAULT_HORIZON
 
 
@@ -147,3 +126,51 @@ def test_the_finishing_adjustment_can_be_disabled():
     assert with_adjustment.predict(player)["expected_points"].iloc[0] != pytest.approx(
         without.predict(player)["expected_points"].iloc[0]
     )
+
+
+# -- Defensive contributions ----------------------------------------------
+
+
+def defensive_career(rate=1.0, matches=30, position="DEF"):
+    frame = career(position)
+    frame["defensive_rate"] = rate
+    frame["defensive_matches"] = matches
+    return frame
+
+
+def test_a_defensive_contributor_scores_more_when_the_season_scores_them():
+    model = PreseasonPredictor(team_defence=DEFENCE, score_defensive_contributions=True)
+    off = PreseasonPredictor(team_defence=DEFENCE, score_defensive_contributions=False)
+
+    player = defensive_career()
+
+    assert (
+        model.predict(player)["expected_points"].iloc[0]
+        > off.predict(player)["expected_points"].iloc[0]
+    )
+
+
+def test_a_season_that_does_not_score_them_ignores_the_rate_entirely():
+    """2024-25 must not be credited for actions that paid nothing."""
+    model = PreseasonPredictor(team_defence=DEFENCE, score_defensive_contributions=False)
+
+    with_rate = model.predict(defensive_career(rate=1.0))["expected_points"].iloc[0]
+    without = model.predict(defensive_career(rate=0.0))["expected_points"].iloc[0]
+
+    assert with_rate == without
+
+
+def test_a_frequent_contributor_outscores_a_rare_one():
+    model = PreseasonPredictor(team_defence=DEFENCE, score_defensive_contributions=True)
+
+    assert (
+        model.predict(defensive_career(rate=0.9))["expected_points"].iloc[0]
+        > model.predict(defensive_career(rate=0.1))["expected_points"].iloc[0]
+    )
+
+
+def test_a_missing_rate_column_is_survivable():
+    """The 2025-26 blind case must produce a prediction, not an exception."""
+    model = PreseasonPredictor(team_defence=DEFENCE, score_defensive_contributions=True)
+
+    assert not model.predict(career("DEF")).empty

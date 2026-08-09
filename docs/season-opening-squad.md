@@ -67,23 +67,32 @@ different jobs:
 
 ### 3.2 Fixture weighting (gameweeks ahead)
 
-Requirement: GW1–2 highest, GW4–5 lower, **after GW10 immaterial**.
+Requirement: the opening three gameweeks weighted heavily and equally, then
+diminishing across gameweeks 4 to 7, then nothing.
 
 ```
-weight(gw) = decay ^ (gw - 1)     for gw ≤ 10
-weight(gw) = 0                    for gw > 10
+weight(gw) = 1.0                    for gw ≤ 3      (the plateau)
+weight(gw) = decay ^ (gw - 3)       for 4 ≤ gw ≤ 7  (the tail)
+weight(gw) = 0                      for gw > 7
 ```
 
-With `decay = 0.78`, GW1 carries 1.00 and GW10 carries 0.11 — roughly a ninth of
-the opening weight, which satisfies "immaterial" without a discontinuity that
-would make the model flip on a single fixture. The cliff at 10 is a hard
-truncation because the requirement is explicit; the decay does most of the work
-before it arrives.
+With `decay = 0.7` that is `[1.00, 1.00, 1.00, 0.70, 0.49, 0.34, 0.24]`.
 
-**Why not weight by squad-hold length instead?** Because a season-opening
-squad is genuinely revisable — you get a free transfer a week. Weighting the
-near fixtures reflects that the later ones will be re-decided with better
-information.
+**Why a plateau rather than a decay from gameweek 1.** The opening three
+gameweeks are the ones the squad is genuinely held for. A geometric decay
+discounts gameweek 3 to 0.61 before anything has happened, which prices in a
+revision the manager has not had the chance to make. Past gameweek 3 the
+opposite is true — a free transfer a week means the gameweek 7 squad is mostly
+a different squad — so the tail decays, and by gameweek 8 the fixtures belong
+to a team that will be re-decided with better information.
+
+**The curve lives in `features/team_strength.py`, not in the predictor**, and
+this matters more than it looks. Inside `PreseasonPredictor` the summed weights
+are a *uniform scalar*: they set the scale of the expected-points numbers but
+cannot change which players the optimiser prefers. The shape only reaches
+selection through `opening_run_difficulty`, which uses the weights to decide
+which *opponents* count. One definition, two consumers — two would have meant
+the requested shape applying to the half that cannot act on it.
 
 ### 3.3 Season weighting (seasons behind)
 
@@ -149,19 +158,45 @@ machinery already in `features/market.py`.
 
 ### 3.6 Defensive contributions
 
-Constrained by data, as noted. **External sources were investigated and none is
-usable** — see §8. A partial workaround exists: a BPS-residual proxy that
-recovers a weak signal for pre-2025-26 seasons. From the single season of real
-data:
+Two points for clearing a threshold of defensive actions: 10 CBIT for
+defenders, 12 CBIRT for midfielders and forwards, goalkeepers ineligible.
+Thresholds and eligibility are exact and verified in `features/defensive.py`.
 
-```
-P(clears threshold) = f( CBIT90 or CBIRT90 , expected minutes )
-```
+**Worth having.** Measured on 2025-26: defensive contributions are **13.6% of
+all defender points**, 7.5% of midfielder points and 8.2% of points overall.
+A player's rate is reasonably persistent within a season — first-half against
+second-half rate correlates **r = 0.635** across 439 players — which is what
+makes it forecastable at all.
 
-Thresholds and positional eligibility are already exact and verified in
-`features/defensive.py`. The estimate carries wide uncertainty and the output
-should say so. For the 15% with no history, and for anyone whose 2025-26
-minutes were thin, this term falls back to a position median.
+**But whether it can be forecast depends entirely on the season**, and this has
+three states rather than two. `defensive_forecast_status()` reports which:
+
+| Target season | Status | Meaning |
+|---|---|---|
+| 2023-24, 2024-25 | `not scored` | The rule did not exist. Scoring none is **correct**. |
+| **2025-26** | **`blind`** | The rule applied, but no prior season recorded the actions. |
+| 2026-27 onward | `forecast` | 2025-26 supplies the rates — 409 of the priced players. |
+
+**The 2025-26 backtest cannot include defensive contributions, and no amount of
+modelling changes that.** The actions were first recorded in the season itself;
+the three seasons before it have no CBI, tackle or recovery counts at all. A
+squad picked for 2025-26 is therefore judged against a scoring route it had no
+way to anticipate — 8.2% of the points on the table, invisible.
+
+This is deliberately *not* silently zeroed. Zero is the right answer for
+2024-25 and the wrong answer for 2025-26, and a model that returns it in both
+cases is right once by accident. The status travels on every row of the
+backtest so a score cannot be read without it.
+
+**2018-19 was checked as a source and rejected.** It is the only other season
+carrying the action counts, but it has no `position` column — and the threshold
+is positional — so it cannot be used even in principle. Seven seasons of
+turnover would have made it worthless in practice regardless.
+
+The gate is on the **season's rules**, from `domain/rules.py`, never on whether
+a column happens to be present. Keying off the column would make "did not
+exist" and "existed but unrecorded" indistinguishable, which is precisely the
+error this section exists to avoid.
 
 ### 3.7 BPS and bonus
 
@@ -308,12 +343,52 @@ Composes §3.4–3.8 through the registry, emitting expected points, confidence
 and per-component provenance. **Test:** component-by-component against
 hand-worked cases, as `ComponentPredictor` is.
 
-### Stage 5 — Fixture-weighted opening run (`fpl/features/opening_run.py`)
-The GW1–10 decay applied to the published fixture list. **Test:** an easy
-opening run outranks an equal club with a hard one; GW11+ changes nothing.
+### Stage 5 — Fixture-weighted opening run (`fpl/features/team_strength.py`)
+The plateau-then-decay curve of §3.2 applied to the published fixture list.
+**Test:** an easy opening run outranks an equal club with a hard one; the first
+three gameweeks are interchangeable; GW8+ changes nothing.
 
 ### Stage 6 — Backtest (`fpl/backtest/preseason.py`)
 The stage that decides whether any of the rest was worth building.
+
+## 6b. Module layout
+
+The constructor was one file doing four jobs — assembling the pool, valuing
+players four different ways, optimising, and scoring the result. Split along
+the layers the architecture already enforces:
+
+| Module | Job | Layer |
+|---|---|---|
+| `features/preseason_pool.py` | Prices + career rates + defensive rates → the candidate pool | features |
+| `models/preseason_strategies.py` | The catalogue of ways to value a player | models |
+| `models/preseason.py` | `PreseasonPredictor`, the component model itself | models |
+| `optimise/preseason.py` | Constructor, recommender, and the explanation | optimise |
+| `backtest/preseason.py` | Replay only: run seasons × horizons × strategies | backtest |
+
+**Why the split is worth the churn:**
+
+*The pool is a feature, not a backtest artefact.* The live recommender and the
+historical replay need exactly the same frame. Building it in the harness meant
+the live path would have had to rebuild it, and two implementations of the same
+join is how they quietly diverge.
+
+*Strategies are registered, not written inline.* `strategies()` is the
+catalogue; `compare_strategies` iterates it. Adding a model gets it measured
+against every benchmark without touching the harness, which is what makes
+"which of these is best" a measurement rather than an argument. `strategy_by_name`
+raises on an unknown name rather than falling back — a silent default would
+report results under the name of a model that does not exist.
+
+*`PreseasonContext` carries the point-in-time guarantee.* A strategy receives
+prior seasons and the target's opening prices. It is never handed the target
+season, so it *cannot* read the answer it is about to be scored against — the
+guarantee is structural rather than a rule each strategy has to remember.
+
+*The recommender is separate from the constructor.* `construct_squad` returns
+the optimal fifteen or nothing. `recommend_squad` adds what the model could
+not see — the excluded third of the pool, and whether defensive contributions
+were invisible. A squad presented without those reads as a complete answer to
+a question the model only partly saw.
 
 ## 7. Backtest design
 
@@ -322,9 +397,19 @@ The stage that decides whether any of the rest was worth building.
 For each season S in {2023-24, 2024-25, 2025-26}:
 
 1. Build the squad using **only seasons before S** and S's GW1 prices.
-2. Score the actual points those fifteen scored over GW1–10 of S.
+2. Score the actual points those fifteen scored over **GW1–3, GW1–5 and
+   GW1–7** of S.
 3. Also score the full season, to see whether an opening-run bias costs
    anything later.
+
+**Three horizons, not one.** The opening squad is judged over the window it is
+actually held for, and that window is not a single number. Three gameweeks is
+what you are certain to hold it for; seven is roughly where a free transfer a
+week has rebuilt it; five is the middle. A model that leads at three and not at
+seven has found something that decays — worth knowing, and invisible if only
+one window is scored. Compare **shares of each horizon's own ceiling**, never
+raw points: a seven-gameweek total is larger for reasons that have nothing to
+do with skill. `compare_horizons()` and `horizon_table()` produce this.
 
 **Benchmarks, in ascending order of difficulty:**
 
@@ -432,101 +517,89 @@ that this can change without touching the model.
 
 ## 10. Results
 
-All of stages 1–6 are now built: cross-season blended rates, team defensive
-strength, a pre-season minutes forecaster, the component predictor, opening-run
-fixture difficulty, a minimum-spend constraint, and the backtest harness.
+Three testable seasons, three scoring horizons, six strategies plus the
+hindsight ceiling. Each squad picked using only seasons strictly before the one
+it plays in, at that season's own gameweek-1 prices.
 
-**Share of the achievable ceiling over the opening ten gameweeks**, each squad
-picked using only seasons strictly before the one it plays in, at that season's
-own gameweek-1 prices:
+**Mean share of the achievable ceiling across the three seasons:**
 
-| Strategy | 2023-24 | 2024-25 | 2025-26 | Mean |
-|---|---|---|---|---|
-| Hindsight (ceiling) | 100% | 100% | 100% | 100% |
-| Components + fixtures | 54% | **64%** | 47% | **55%** |
-| BlendedCareer + minutes | **61%** | 61% | 43% | **55%** |
-| Components | 48% | 58% | 49% | 52% |
-| PriorSeasonPoints (the heuristic) | 49% | 47% | **55%** | 50% |
-| BlendedCareer, no minutes | 21% | 25% | 11% | 19% |
-| Uninformed (floor) | 19% | 16% | 15% | 17% |
+| Strategy | GW1–3 | GW1–5 | GW1–7 |
+|---|---|---|---|
+| Hindsight (ceiling) | 100% | 100% | 100% |
+| **BlendedCareer + minutes** | **42%** | **49%** | **52%** |
+| Components + fixtures | 42% | 47% | 48% |
+| Components | 41% | 45% | 49% |
+| PriorSeasonPoints (the heuristic) | 38% | 44% | **52%** |
+| BlendedCareer, no minutes | 15% | 18% | 19% |
+| Uninformed (floor) | 13% | 16% | 17% |
 
-### Minutes are the finding. Everything else is a rounding error beside them.
+**Per season, at each horizon:**
 
-The first version used blended per-90 rates with a constant minutes assumption.
-In 2025-26 it scored **11% of the ceiling — below picking a legal squad at
-random**. Its fifteen players played **1,121 minutes** across the opening run
-where the naive heuristic's played **10,234**. It bought high-rate players who
-do not play, and spent only £76m of the £100m available.
+| Strategy | 23-24 | 24-25 | 25-26 | | 23-24 | 24-25 | 25-26 | | 23-24 | 24-25 | 25-26 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| | **GW1–3** | | | | **GW1–5** | | | | **GW1–7** | | |
+| BlendedCareer + minutes | 40% | 55% | 31% | | 51% | 62% | 34% | | **55%** | **63%** | 37% |
+| Components + fixtures | 37% | **63%** | 27% | | 45% | **63%** | 33% | | 44% | 62% | 37% |
+| Components | 33% | 54% | 36% | | 39% | 57% | 40% | | 44% | 59% | 44% |
+| PriorSeasonPoints | 32% | 39% | **45%** | | 41% | 40% | **51%** | | 51% | 51% | **53%** |
 
-A per-90 rate says how good a player is *while on the pitch*. Multiplying it by
-a constant treats a twenty-minute substitute as a starter. Prior-season totals
-implicitly carry minutes, which is precisely why the unsophisticated heuristic
-beat the sophisticated blend.
+Defensive-contribution status: 2023-24 and 2024-25 `not scored`, 2025-26
+`blind`. See §3.6 — the 2025-26 squads are judged against 8.2% of points no
+model could see.
 
-Adding a minutes forecast took the same model from **19% to 55%** on the
-three-season mean. No other change in this project has moved a number that far.
+### The model edge is real early and gone by gameweek 7
 
-### The full budget constraint is inert, and that is itself the answer
+At three gameweeks the best model takes 42% against the heuristic's 38%; at
+five, 49% against 44%. By seven they are **tied at 52%**.
 
-`SquadConstraints.min_spend` was added so a squad could be forced to consume the
-whole £100m. Measured, it changes **nothing**: every strategy with a minutes
-term already spends £100.0m without being told to.
+That is a more useful shape than the single number it replaces. The heuristic
+converges on the models as the window lengthens because a prior-season points
+total is a good estimate of *season-long* value and a poor estimate of who
+starts in August. The modelling advantage is concentrated exactly where the
+squad is least revisable — which is the part worth having, since a squad is
+rebuilt by gameweek 7 anyway.
 
-Underspending was never a separate problem to fix. It was a *symptom* of the
-missing minutes term — a model that rates bench players highly buys cheap bench
-players and cannot find anything to do with the rest of the money. Fix the
-cause and the symptom goes with it. The constraint stays because it is correct
-and costs nothing, not because it earned its place.
+Scoring only at gameweek 7, as the earlier design did, would have reported a
+dead heat and concluded there was nothing here.
 
-### Components and fixtures: not established, either way
+### Minutes remain the whole story
 
-The component model (goals by position, assists, clean sheets from the club a
-player is joining, bonus, finishing adjustment) scores **52%** against the
-simple minutes model's **55%**. Adding fixture difficulty lifts it to **55%** —
-a dead heat with the far simpler thing.
+19% → 52% on the mean, from adding a minutes forecast and nothing else. Every
+subsequent refinement moves the number by a few points and none of them
+consistently. The `BlendedCareer` row is retained in the catalogue as evidence
+rather than as a candidate: it scores *below the uninformed floor* at three
+gameweeks in 2025-26 (7% against 13%), because a per-90 rate divided by few
+minutes is largest for players who barely play.
 
-Neither is consistent. Fixtures help in two seasons and hurt in the third; the
-component model beats the simple one in one season of three. Opening-run
-difficulty spans a narrow band across clubs, so it perturbs the ranking by about
-as much as it adds noise, and three squads cannot separate those.
+### Components have still not earned their place
 
-**So fixture weighting is off by default** and the caller opts in
-(`expected_points_from_components(..., use_fixtures=True)`). The requirement
-asked for it, it is built, tested and available; what the evidence does not
-support is switching it on silently.
+`Components` (49% at GW7) and `Components+Fixtures` (48%) both sit **below** the
+far simpler `BlendedCareer+Minutes` (52%). They win convincingly in 2024-25 —
+62% against the heuristic's 51% — and lose in the other two.
 
-### A gap the numbers above do not show: a third of the pool is invisible
+Six measured refinements have now failed to beat a minutes-scaled rate. The
+consistent reading across this project is that prediction quality is not the
+binding constraint.
 
-Of the 690 players priced in gameweek 1 of 2025-26, **239 (35%) carry no prior
-Premier League minutes** and therefore get no expected points at all. They are
-silently dropped before the optimiser sees them. **160 of the 239 are under
-£5m** — precisely the bench slots a real squad has to fill.
+### 2025-26 remains the season that disagrees
 
-This is larger than the 15% quoted in §2, which counted a different population
-(the current API's 573 selectable players rather than every priced entry in the
-archive). Both numbers are right about what they measure; the one that matters
-for this model is 35%.
+Every model loses to the heuristic in 2025-26, at every horizon, while winning
+in the other two. It is also the only season played under current scoring rules
+*and* the only season where the models were blind to a scoring route worth 8.2%
+of points.
 
-The design (§2, §5) calls for a position-and-price prior for these players.
-**That is specified and not yet built.** Dropping them is the conservative
-choice — inventing a rate would let the optimiser buy an unknown on a guess —
-but it is a real restriction on the search space, not a neutral default, and
-the backtest results above were produced under it.
+Those two facts are both true and it is not established that the second causes
+the first — the heuristic was equally blind to defensive contributions. Stated
+as an open question rather than an explanation. A second current-rules season
+(2026-27), where defensive contributions become forecastable, is what would
+separate them.
 
-### The honest bottom line
+### What this can and cannot show
 
-On the three-season mean the best model captures **55%** of the ceiling against
-the obvious heuristic's **50%**. But on **2025-26 — the only season played under
-the current scoring rules — the heuristic wins outright**, and every model here
-loses to it.
-
-That is the same shape this project has hit repeatedly: pooled results and
-current-rules results disagree, and the pooled mean flatters the model. Three
-squads is not a sample. The design said in advance that this test can rule a
-model out but cannot establish one, and nothing here establishes one.
-
-What it has done is locate the binding constraint. It is minutes, and it is not
-close.
+Three seasons, three squads per strategy. The design said in advance that this
+can rule a model out but cannot establish one, and that remains true. The
+result is permission to use the minutes-scaled model, not evidence that it is
+skilful.
 
 ## 11. Recommendation
 

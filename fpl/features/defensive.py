@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from fpl.domain.identity import add_match_key
 from fpl.domain.positions import canonical_position
 
 CLEARANCES_BLOCKS_INTERCEPTIONS = "clearances_blocks_interceptions"
@@ -50,6 +51,9 @@ GOALKEEPER = "GK"
 
 # Actions needed to earn the two points.
 DEFENSIVE_THRESHOLD = {"DEF": 10, "MID": 12, "FWD": 12}
+
+# The threshold is only reachable by a player who was on the pitch for it.
+FULL_APPEARANCE_MINUTES = 60
 DEFENSIVE_CONTRIBUTION_POINTS = 2
 
 # The BPS table and the measured size of the gap now live in fpl/domain/bps.py,
@@ -132,3 +136,77 @@ def add_defensive_metrics(appearances: pd.DataFrame) -> pd.DataFrame:
     df["cleared_defensive_threshold"] = clears_threshold(df)
     df["defensive_points"] = defensive_points(df)
     return df
+
+
+# -- Pre-season forecasting ------------------------------------------------
+
+DEFENSIVE_CONTRIBUTION_POINTS = 2
+
+
+def defensive_contribution_rate(season_data: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Per-player rate of clearing the defensive-contribution threshold.
+
+    What a pre-season forecast needs, and it is a different question from
+    ``defensive_points``: not "did this player clear the threshold in this
+    match" but "what share of their matches do they clear it in".
+
+    Only seasons carrying the underlying action counts contribute. Seasons
+    without them are skipped rather than counted as zero — a player is not a
+    poor defensive contributor because nobody recorded his tackles.
+
+    Returns ``match_key``, ``defensive_matches`` and ``defensive_rate`` (0 to
+    1). Players absent from every season carrying the data are simply absent,
+    which is how the caller can tell "will not clear it" from "unknown".
+    """
+    frames = []
+    for data in season_data.values():
+        if data.empty or "player_name" not in data.columns:
+            continue
+        # No action counts means this season cannot speak to the question. The
+        # threshold is positional, so a season carrying the counts but not the
+        # positions cannot either -- 2018-19 is exactly that case.
+        if not {"clearances_blocks_interceptions", "recoveries", "tackles"} & set(data.columns):
+            continue
+        if not {"position", "minutes"} <= set(data.columns):
+            continue
+
+        played = data[data["minutes"] >= FULL_APPEARANCE_MINUTES].copy()
+        if played.empty:
+            continue
+
+        played["cleared"] = clears_threshold(played).fillna(False).astype(float)
+        frames.append(played[["player_name", "cleared"]])
+
+    if not frames:
+        return pd.DataFrame(columns=["match_key", "defensive_matches", "defensive_rate"])
+
+    combined = pd.concat(frames, ignore_index=True)
+    rate = combined.groupby("player_name", as_index=False).agg(
+        defensive_matches=("cleared", "size"), defensive_rate=("cleared", "mean")
+    )
+    return add_match_key(rate, "player_name")
+
+
+def expected_defensive_points(
+    rate: pd.Series, start_probability: pd.Series, reliable_matches: pd.Series | None = None
+) -> pd.Series:
+    """Defensive-contribution points per match from a rate and a start chance.
+
+    The threshold pays only to a player on the pitch long enough to reach it,
+    so the rate is scaled by the chance of a full appearance rather than
+    applied flat.
+
+    ``reliable_matches`` regresses thin samples towards the population, the
+    same correction the minutes forecaster needs and for the same reason: a
+    player who cleared the threshold in his only match is not a certainty.
+    """
+    if rate.empty:
+        return pd.Series(dtype="float64")
+
+    adjusted = rate.fillna(0.0)
+    if reliable_matches is not None:
+        weight = (reliable_matches.fillna(0) / 20).clip(0, 1)
+        population = float(adjusted[weight > 0].mean()) if (weight > 0).any() else 0.0
+        adjusted = weight * adjusted + (1 - weight) * population
+
+    return adjusted * start_probability.fillna(0.0) * DEFENSIVE_CONTRIBUTION_POINTS

@@ -69,3 +69,25 @@ def valid_formations() -> list[tuple[int, int, int]]:
             if limits.minimum <= forwards <= limits.maximum:
                 formations.append((defenders, midfielders, forwards))
     return formations
+
+
+# -- Scoring rules that changed between seasons ---------------------------
+
+# Defensive contributions arrived in 2025-26 and continue in 2026-27. The three
+# seasons before it had no such route to points at all.
+#
+# This is a property of the **season being played**, not of whether a data file
+# happens to carry the column, and the distinction is load-bearing. For a
+# 2024-25 squad, scoring no defensive contributions is *correct* -- they did not
+# exist. For a 2025-26 squad they very much did, and a model that scores none
+# because its prior seasons lack the data is not correct, it is blind. Keying
+# off the column would make those two cases indistinguishable.
+DEFENSIVE_CONTRIBUTION_FIRST_SEASON = "2025-26"
+
+
+def season_scores_defensive_contributions(season: str) -> bool:
+    """Whether ``season`` was played under defensive-contribution scoring.
+
+    Season labels are ``YYYY-YY``, which sorts chronologically as a string.
+    """
+    return bool(season) and season >= DEFENSIVE_CONTRIBUTION_FIRST_SEASON

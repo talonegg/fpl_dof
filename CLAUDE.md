@@ -131,6 +131,41 @@ minutes term already spends £100.0m unprompted. Underspending was what a model
 that over-rates bench players looks like, not a separate defect to constrain
 away.
 
+**Season-opening selection is four modules, not one.** `features/preseason_pool.py`
+assembles the candidate pool (prices + career rates + defensive rates);
+`models/preseason_strategies.py` is the registry of ways to value a player;
+`optimise/preseason.py` constructs and explains the squad;
+`backtest/preseason.py` only replays. Add a model to `strategies()` and it is
+measured against every benchmark automatically — never construct one at a call
+site, or the comparison silently stops being complete. `PreseasonContext` is
+handed prior seasons and opening prices but never the target season, so the
+point-in-time guarantee is structural rather than a rule each strategy has to
+remember.
+
+**Defensive contributions have three states, not two.** `not scored` (before
+2025-26 — zero is *correct*), `forecast` (2026-27 onward, from 2025-26 data),
+and `blind` (2025-26 itself: the rule applied but no prior season recorded the
+actions, so 8.2% of points were invisible to any model). Gate on
+`domain/rules.py:season_scores_defensive_contributions`, never on whether a
+column exists — that would make "did not exist" and "existed but unrecorded"
+indistinguishable. DC is worth 13.6% of defender points and a player's rate
+persists within a season (r = 0.64). 2018-19 is the only other season carrying
+the action counts and is unusable: no `position` column, and the threshold is
+positional.
+
+**The fixture curve is flat then decaying, and lives in `features/`.**
+`[1.00, 1.00, 1.00, 0.70, 0.49, 0.34, 0.24]` over GW1–7: the opening three are
+held for certain, the tail is not. It lives in `features/team_strength.py`
+because two consumers must share it — inside `PreseasonPredictor` the summed
+weights are a *uniform scalar* that cannot reorder players, so the shape only
+reaches selection through `opening_run_difficulty`, which decides which
+opponents count.
+
+**Score the opening squad at three horizons, not one.** `SCORING_HORIZONS =
+(3, 5, 7)` — certain hold, middle, and roughly where a free transfer a week has
+rebuilt the squad. Compare shares of each horizon's *own* ceiling; raw points
+across horizons are not comparable.
+
 **Expected points and optimisation stay separate.** The predictor answers "how many
 points will this player score in GW N". The optimiser answers "given those numbers
 and the FPL rules, what is the best squad". Never let a heuristic about budget or

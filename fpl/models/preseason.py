@@ -22,7 +22,15 @@ import pandas as pd
 
 from fpl.domain.positions import canonical_position
 from fpl.features.career import finishing_multiplier
-from fpl.features.team_strength import clean_sheet_probability, expected_concession
+from fpl.features.defensive import expected_defensive_points
+from fpl.features.team_strength import (
+    DEFAULT_FIXTURE_DECAY,
+    DEFAULT_HORIZON,
+    PLATEAU_GAMEWEEKS,
+    clean_sheet_probability,
+    expected_concession,
+    fixture_weights,
+)
 from fpl.models.minutes_forecast import PreseasonMinutes
 
 MINUTES_PER_MATCH = 90
@@ -35,26 +43,8 @@ ASSIST_POINTS = 3
 APPEARANCE_FULL = 2
 APPEARANCE_PARTIAL = 1
 
-# Fixture weighting across the opening run. 0.78 puts gameweek 1 at 1.00 and
-# gameweek 10 at 0.11 -- roughly a ninth -- which satisfies "immaterial after
-# 10" without a cliff that would make the squad flip on a single fixture.
-DEFAULT_FIXTURE_DECAY = 0.78
-DEFAULT_HORIZON = 10
-
 # A league-average opponent, used when a fixture list is not supplied.
 NEUTRAL_OPPONENT_XG = 1.4
-
-
-def fixture_weights(
-    horizon: int = DEFAULT_HORIZON, decay: float = DEFAULT_FIXTURE_DECAY
-) -> list[float]:
-    """Weight per gameweek of the opening run, near fixtures highest.
-
-    Truncated hard after ``horizon`` because the requirement is explicit that
-    later gameweeks should not influence the opening squad. The decay has
-    already done most of the work by then, so the truncation is not a cliff.
-    """
-    return [decay**index for index in range(horizon)]
 
 
 @dataclass
@@ -69,10 +59,17 @@ class PreseasonPredictor:
 
     horizon: int = DEFAULT_HORIZON
     fixture_decay: float = DEFAULT_FIXTURE_DECAY
+    fixture_plateau: int = PLATEAU_GAMEWEEKS
     minutes: PreseasonMinutes = field(default_factory=PreseasonMinutes)
     team_defence: pd.DataFrame = field(default_factory=pd.DataFrame)
     promoted_prior: float = 1.75
     use_finishing_adjustment: bool = True
+
+    # Whether the season being predicted scores defensive contributions. Set
+    # from the season's rules (domain/rules.py), never from whether the data
+    # happens to carry the column -- see the note there on why those are
+    # different questions.
+    score_defensive_contributions: bool = False
 
     @property
     def name(self) -> str:
@@ -150,10 +147,21 @@ class PreseasonPredictor:
             # they follow the new club rather than the player's own record.
             clean_sheets = self._clean_sheet_rate(df["team"]) * starts * clean_sheet_value
 
-        per_match = appearance + goals * goal_value + assists + clean_sheets + bonus
+        defensive = pd.Series(0.0, index=df.index)
+        if self.score_defensive_contributions and "defensive_rate" in df.columns:
+            defensive = expected_defensive_points(
+                df["defensive_rate"], starts, df.get("defensive_matches")
+            )
 
-        weights = fixture_weights(self.horizon, self.fixture_decay)
-        weighted_matches = sum(weights)
+        per_match = appearance + goals * goal_value + assists + clean_sheets + bonus + defensive
+
+        # Note this is a uniform scalar: it sets the scale of the numbers but
+        # cannot change which players the optimiser prefers. The weighting
+        # shape only reaches selection through fixture_difficulty below, which
+        # is built on the same curve.
+        weighted_matches = sum(
+            fixture_weights(self.horizon, self.fixture_decay, self.fixture_plateau)
+        )
 
         expected = per_match * weighted_matches
         if fixture_difficulty is not None:

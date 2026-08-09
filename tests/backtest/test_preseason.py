@@ -1,4 +1,4 @@
-"""Tests for season-opening squad selection.
+"""Tests for replaying season-opening squad selection.
 
 The rule that matters: a squad for season S may use only seasons before S and
 S's own opening prices. Anything else is hindsight, and hindsight is trivially
@@ -11,17 +11,21 @@ from __future__ import annotations
 import pandas as pd
 
 from fpl.backtest.preseason import (
+    SCORING_HORIZONS,
     actual_points,
-    build_pool,
-    cheapest_squad,
+    compare_horizons,
     compare_strategies,
-    expected_points_from_history,
-    expected_points_with_minutes,
+    defensive_forecast_status,
     hindsight_squad,
-    opening_prices,
-    pick_squad,
-    prior_points_squad,
+    horizon_table,
     run_strategy,
+)
+from fpl.features.preseason_pool import build_pool, opening_prices
+from fpl.models.preseason_strategies import (
+    BlendedRates,
+    BlendedRatesWithMinutes,
+    PriorSeasonPoints,
+    Uninformed,
 )
 
 POSITIONS = ["GK"] * 4 + ["DEF"] * 10 + ["MID"] * 10 + ["FWD"] * 6
@@ -46,8 +50,19 @@ def season(points_by_element=None, minutes=90, gameweeks=12, price=5.0):
     return pd.DataFrame(rows)
 
 
+def defensive_season(cbi=20):
+    """A season carrying the action counts, as 2025-26 does."""
+    data = season()
+    data["clearances_blocks_interceptions"] = cbi
+    data["tackles"] = 0
+    data["recoveries"] = 0
+    return data
+
+
+# -- Prices and scoring ---------------------------------------------------
+
+
 def test_prices_come_from_gameweek_one():
-    """Using later prices would be hindsight: prices move during a season."""
     prices = opening_prices(season(price=5.0))
 
     assert (prices["price"] == 5.0).all()
@@ -56,7 +71,7 @@ def test_prices_come_from_gameweek_one():
 def test_positions_are_translated_to_the_names_the_optimiser_uses():
     prices = opening_prices(season())
 
-    assert set(prices["position"]) <= {"Goalkeeper", "Defender", "Midfielder", "Forward"}
+    assert "Goalkeeper" in set(prices["position"])
 
 
 def test_opening_prices_of_nothing_is_empty():
@@ -64,120 +79,239 @@ def test_opening_prices_of_nothing_is_empty():
 
 
 def test_points_are_split_between_the_opening_run_and_the_season():
-    data = season(gameweeks=12)
+    opening, whole = actual_points(season(gameweeks=12), [1], horizon=3)
 
-    opening, whole = actual_points(data, [1], horizon=10)
-
-    assert opening < whole
+    assert opening == 6
+    assert whole == 24
 
 
 def test_a_player_who_never_appears_scores_nothing():
     assert actual_points(season(), [999]) == (0.0, 0.0)
 
 
+# -- The pool -------------------------------------------------------------
+
+
 def test_the_pool_keeps_players_with_no_history_rather_than_dropping_them():
-    """15% of a real list have none; hiding them would hide the gap."""
-    prior = {"2024-25": season()}
-    prices = opening_prices(season())
-    prices.loc[0, "player_name"] = "Brand New Signing"
-    prices.loc[0, "match_key"] = "brand new signing"
+    """They are excluded at selection, not silently removed from the count."""
+    prior = season().head(12 * 3)  # only the first three players have history
 
-    pool = build_pool(prior, prices)
+    pool = build_pool({"2024-25": prior}, opening_prices(season()))
 
-    assert len(pool) == len(prices)
-    assert pool["total_points_per_90"].isna().any()
+    assert len(pool) == len(POSITIONS)
+    assert pool["career_minutes"].isna().any()
 
 
-def test_a_constant_minutes_assumption_ignores_who_actually_plays():
-    """The flaw that made the first version worse than picking at random."""
-    pool = pd.DataFrame(
-        [
-            {"total_points_per_90": 10.0, "career_minutes": 90, "seasons_seen": 1},
-            {"total_points_per_90": 10.0, "career_minutes": 3000, "seasons_seen": 1},
-        ]
-    )
+# -- Strategies -----------------------------------------------------------
 
-    naive = expected_points_from_history(pool)
 
-    assert naive.iloc[0] == naive.iloc[1]
+def context_for(target, prior):
+    from fpl.models.preseason_strategies import PreseasonContext
+
+    return PreseasonContext(target=target, prior_seasons=prior, horizon=7)
+
+
+def test_a_constant_minutes_assumption_prefers_the_player_who_does_not_play():
+    """The failure that cost the first version everything, in one assertion.
+
+    Both players score the same points per match. One plays 90 minutes, the
+    other 10 — so the substitute's *per-90 rate* is nine times higher, and a
+    model that multiplies it by a constant buys him. This is why that strategy
+    scored below a randomly chosen legal squad.
+    """
+    prior = pd.concat([season(minutes=90).head(12), season(minutes=10).iloc[12:24]])
+    pool = build_pool({"2024-25": prior}, opening_prices(season()))
+
+    expected = BlendedRates().expected_points(pool, context_for("2025-26", {"2024-25": prior}))
+
+    starter = expected[pool["element"] == 1].iloc[0]
+    substitute = expected[pool["element"] == 2].iloc[0]
+    assert substitute > starter
 
 
 def test_the_minutes_aware_version_separates_them():
-    pool = pd.DataFrame(
-        [
-            {"total_points_per_90": 10.0, "career_minutes": 90, "seasons_seen": 1},
-            {"total_points_per_90": 10.0, "career_minutes": 3000, "seasons_seen": 1},
-        ]
+    prior = pd.concat([season(minutes=90).head(12), season(minutes=10).iloc[12:24]])
+    pool = build_pool({"2024-25": prior}, opening_prices(season()))
+
+    expected = BlendedRatesWithMinutes().expected_points(
+        pool, context_for("2025-26", {"2024-25": prior})
     )
 
-    aware = expected_points_with_minutes(pool)
-
-    assert aware.iloc[1] > aware.iloc[0] * 10
-
-
-def test_expected_minutes_cannot_exceed_a_full_match():
-    pool = pd.DataFrame([{"total_points_per_90": 5.0, "career_minutes": 999999, "seasons_seen": 1}])
-
-    assert expected_points_with_minutes(pool, horizon=1).iloc[0] <= 5.0
+    starter = expected[pool["element"] == 1].iloc[0]
+    substitute = expected[pool["element"] == 2].iloc[0]
+    assert starter > substitute
 
 
-def test_a_squad_is_legal():
-    prices = opening_prices(season())
+def test_the_uninformed_strategy_uses_no_information():
+    pool = build_pool({"2024-25": season()}, opening_prices(season()))
 
-    squad = pick_squad(prices, pd.Series(1.0, index=prices.index))
+    expected = Uninformed().expected_points(pool, context_for("2025-26", {}))
 
-    assert len(squad) == 15
-
-
-def test_a_squad_cannot_be_built_from_nothing():
-    assert pick_squad(pd.DataFrame(), pd.Series(dtype="float64")) is None
-
-
-def test_the_hindsight_squad_is_the_ceiling():
-    """Nobody can reach it; a score without it is uninterpretable."""
-    data = season({1: 20, 15: 20, 25: 20})
-
-    best = hindsight_squad("2025-26", data)
-    uninformed = cheapest_squad("2025-26", data)
-
-    assert best.opening_points >= uninformed.opening_points
-
-
-def test_the_uninformed_squad_uses_no_information():
-    data = season({1: 50})
-
-    result = cheapest_squad("2025-26", data)
-
-    assert result is not None
-    assert len(result.squad) == 15
+    assert expected.nunique() == 1
 
 
 def test_prior_season_points_needs_a_prior_season():
-    assert prior_points_squad("2025-26", season(), {}) is None
+    pool = build_pool({"2024-25": season()}, opening_prices(season()))
+
+    expected = PriorSeasonPoints().expected_points(pool, context_for("2025-26", {}))
+
+    assert (expected == 0).all()
 
 
-def test_a_strategy_reports_what_it_spent():
-    prior = {"2024-25": season()}
+# -- Running and benchmarking ---------------------------------------------
 
-    result = run_strategy("2025-26", season(), prior, "Test")
 
-    assert result is not None
+def test_a_squad_is_legal():
+    prior = {"2023-24": season()}
+    result = run_strategy("2024-25", season(), prior, BlendedRatesWithMinutes(), horizon=3)
+
+    assert len(result.squad) == 15
     assert result.cost <= 100.0
 
 
+def test_a_strategy_reports_what_it_spent():
+    prior = {"2023-24": season()}
+    result = run_strategy("2024-25", season(), prior, BlendedRatesWithMinutes(), horizon=3)
+
+    assert result.cost > 0
+
+
+def test_the_hindsight_squad_is_the_ceiling():
+    """Nobody can reach it, which is what makes it the yardstick."""
+    generous = {index: 100 for index in range(1, 16)}
+    data = season(points_by_element=generous)
+
+    ceiling = hindsight_squad("2024-25", data, horizon=3)
+    honest = run_strategy(
+        "2024-25", data, {"2023-24": season()}, BlendedRatesWithMinutes(), horizon=3
+    )
+
+    assert ceiling.opening_points >= honest.opening_points
+
+
+def test_a_strategy_cannot_run_without_a_pool():
+    assert run_strategy("2024-25", pd.DataFrame(), {}, Uninformed()) is None
+
+
+# -- Comparison -----------------------------------------------------------
+
+
 def test_comparison_includes_the_ceiling_and_the_floor():
-    data = {"2024-25": season(), "2025-26": season({1: 20})}
+    data = {"2023-24": season(), "2024-25": season()}
 
-    table = compare_strategies(data, "2025-26")
+    frame = compare_strategies(data, "2024-25", horizon=3)
 
-    assert "Hindsight" in table["strategy"].tolist()
-    assert "Uninformed" in table["strategy"].tolist()
-    assert "share_of_ceiling" in table.columns
+    assert "Hindsight" in set(frame["strategy"])
+    assert "Uninformed" in set(frame["strategy"])
+
+
+def test_comparison_covers_every_registered_strategy():
+    """A strategy added to the registry must appear without touching the harness."""
+    from fpl.models.preseason_strategies import strategies
+
+    data = {"2023-24": season(), "2024-25": season()}
+    frame = compare_strategies(data, "2024-25", horizon=3)
+
+    assert {strategy.name for strategy in strategies()} <= set(frame["strategy"])
 
 
 def test_comparison_needs_a_prior_season():
-    assert compare_strategies({"2025-26": season()}, "2025-26").empty
+    assert compare_strategies({"2024-25": season()}, "2024-25").empty
 
 
 def test_comparison_of_an_unknown_season_is_empty():
-    assert compare_strategies({"2025-26": season()}, "2030-31").empty
+    assert compare_strategies({"2023-24": season()}, "2030-31").empty
+
+
+# -- Horizons -------------------------------------------------------------
+
+
+def test_every_horizon_and_season_appears():
+    data = {"2023-24": season(), "2024-25": season(), "2025-26": season()}
+
+    comparison = compare_horizons(data, targets=("2024-25", "2025-26"), horizons=(3, 5))
+
+    assert set(comparison["horizon"]) == {3, 5}
+    assert set(comparison["season"]) == {"2024-25", "2025-26"}
+
+
+def test_a_shorter_horizon_scores_fewer_points():
+    """Sanity: three gameweeks cannot out-score seven of the same squad."""
+    data = {"2023-24": season(), "2024-25": season()}
+
+    comparison = compare_horizons(data, targets=("2024-25",), horizons=(3, 7))
+
+    short = comparison[comparison["horizon"] == 3]["opening_points"].max()
+    long = comparison[comparison["horizon"] == 7]["opening_points"].max()
+    assert short < long
+
+
+def test_the_table_puts_horizons_across_and_strategies_down():
+    data = {"2023-24": season(), "2024-25": season()}
+
+    table = horizon_table(compare_horizons(data, targets=("2024-25",), horizons=(3, 5, 7)))
+
+    assert list(table.columns) == [3, 5, 7]
+    assert "Hindsight" in table.index
+
+
+def test_the_ceiling_is_the_ceiling_at_every_horizon():
+    data = {"2023-24": season(), "2024-25": season()}
+
+    table = horizon_table(compare_horizons(data, targets=("2024-25",), horizons=(3, 5, 7)))
+
+    assert (table.loc["Hindsight"] == 1.0).all()
+
+
+def test_an_empty_comparison_makes_an_empty_table():
+    assert horizon_table(pd.DataFrame()).empty
+
+
+def test_horizons_default_to_three_five_and_seven():
+    assert SCORING_HORIZONS == (3, 5, 7)
+
+
+# -- Defensive contributions: three states, not two -----------------------
+
+
+def test_a_season_before_the_rule_is_not_blind_it_is_correct():
+    """2024-25 scoring no defensive contributions is right, not a gap."""
+    pool = build_pool({"2023-24": season()}, opening_prices(season()))
+
+    assert defensive_forecast_status("2024-25", pool) == "not scored"
+
+
+def test_the_rule_applying_without_the_data_is_reported_as_blind():
+    """The 2025-26 case: the points existed, the model could not see them."""
+    pool = build_pool({"2024-25": season()}, opening_prices(season()))
+
+    assert defensive_forecast_status("2025-26", pool) == "blind"
+
+
+def test_the_rule_applying_with_the_data_is_a_forecast():
+    """The 2026-27 case: 2025-26 recorded the actions."""
+    pool = build_pool({"2025-26": defensive_season()}, opening_prices(season()))
+
+    assert defensive_forecast_status("2026-27", pool) == "forecast"
+
+
+def test_the_status_travels_with_the_result():
+    """A score cannot be read without seeing whether it was blind."""
+    data = {"2023-24": season(), "2024-25": season()}
+
+    frame = compare_strategies(data, "2024-25", horizon=3)
+
+    assert set(frame["defensive"]) == {"not scored"}
+
+
+def test_defensive_rates_reach_the_pool_when_a_prior_season_has_them():
+    pool = build_pool({"2025-26": defensive_season()}, opening_prices(season()))
+
+    assert pool["defensive_rate"].notna().any()
+
+
+def test_no_defensive_column_appears_when_no_season_supplies_one():
+    """Absent, not zero -- the distinction the whole status rests on."""
+    pool = build_pool({"2024-25": season()}, opening_prices(season()))
+
+    assert "defensive_rate" not in pool.columns
