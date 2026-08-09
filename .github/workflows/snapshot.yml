@@ -5,9 +5,20 @@ name: Snapshot FPL data
 # commits never trigger a redeploy of the app.
 on:
   schedule:
-    # 06:00 UTC daily. Gameweek deadlines are typically Friday/Saturday
-    # morning, so this reliably lands a capture before each one.
+    # Twice daily, and the second run is the important one.
+    #
+    # 06:00 UTC captures the day's state after the overnight price changes.
+    # This is the run that writes the append-only daily file, which is the
+    # only record that will ever exist of injury status and set-piece duty.
     - cron: "0 6 * * *"
+    #
+    # 11:30 UTC captures the state closest to the deadline. Measured across
+    # 2026-27, the earliest deadline is 12:30 UTC and 29 of 38 fall between
+    # 12:00 and 14:00 — so the 06:00 run alone is 6.5 hours stale by the time
+    # a gameweek locks, and the hours before a deadline are exactly when team
+    # news lands. This run overwrites the gameweek snapshot and leaves the
+    # daily file alone, which is what write_daily_signals already enforces.
+    - cron: "30 11 * * *"
   workflow_dispatch:
 
 permissions:

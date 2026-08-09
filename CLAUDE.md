@@ -144,6 +144,20 @@ Adding a field to the model means adding it to `lineage.py` too, or the test
 fails. That is deliberate: a model listing a column that will always be empty
 is worse than one that omits it.
 
+## Refresh and orchestration
+
+`docs/refresh-schedule.md` documents when each dataset refreshes and why. The
+policy lives in `fpl/store/refresh.py`, and `tests/store/test_refresh.py`
+checks it against the actual cron lines and cache TTLs — so the schedule cannot
+drift from the document describing it.
+
+Two scheduled runs, both `.github/workflows/snapshot.yml`. **06:00 UTC** writes
+the append-only daily file; **11:30 UTC** refreshes only the gameweek snapshot,
+because the earliest deadline is 12:30 UTC and a 06:00 capture is 6.5 hours
+stale by then. Never make the second run overwrite the daily file: that would
+replace the morning's injury news with the afternoon's and destroy the
+point-in-time property.
+
 ## Data conventions
 
 - Prices from the API are integer tenths (`now_cost: 55` → £5.5m). Convert once,
