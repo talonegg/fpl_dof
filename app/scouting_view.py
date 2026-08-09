@@ -19,7 +19,7 @@ import streamlit as st
 
 from app.theme import MAX_COMPARISON_SERIES, series_colours
 from fpl.domain.history import collapse_to_gameweeks
-from fpl.features.availability import flagged
+from fpl.features.availability import add_return_dates, flagged
 from fpl.features.filters import restrict_to_available
 from fpl.features.rates import LOW_MINUTES_THRESHOLD
 
@@ -66,10 +66,16 @@ def _history_for(history: pd.DataFrame, element: int) -> pd.DataFrame:
 
 
 def render_availability(players: pd.DataFrame) -> None:
-    """Who is carrying an injury, suspension or doubt.
+    """Who is carrying an injury, suspension or doubt, and until when.
 
-    Shown before anything else in the scouting tab: no amount of expected
-    points matters if the player is not going to be on the pitch.
+    Deliberately ignores the sidebar's availability filter: this is the
+    reference table you consult *because* the filter has hidden someone, so
+    filtering it by the same control would empty it exactly when it is wanted.
+    Club, position and price still apply.
+
+    Sorted by return date with the unknowns last, because "out until Saturday"
+    and "nobody knows" are different problems and only one of them is worth
+    waiting on.
     """
     st.subheader("Availability")
 
@@ -78,15 +84,27 @@ def render_availability(players: pd.DataFrame) -> None:
         st.caption("No availability concerns among the filtered players.")
         return
 
+    concerns = add_return_dates(concerns)
+    unknown = concerns["return_date"].isna()
+
     display = concerns.assign(
-        Fit=(concerns["availability"] * 100).round().astype(int).astype(str) + "%"
+        Fit=(concerns["availability"] * 100).round().astype(int).astype(str) + "%",
+        Back=concerns["return_date"].dt.strftime("%d %b").fillna("—"),
+        Why=concerns["return_status"],
     )
+    # Known dates first and soonest first; the unknowns are a separate problem
+    # and belong at the end rather than sorted arbitrarily among them.
+    display = display.assign(_unknown=unknown).sort_values(["_unknown", "return_date", "web_name"])
+
     columns = {"web_name": "Player", "team_name": "Team", "news": "News"}
     available = [column for column in columns if column in display.columns]
 
-    st.caption(f"{len(concerns)} player(s) with news. Check before transferring in.")
+    st.caption(
+        f"{len(concerns)} player(s) with news, of whom {int(unknown.sum())} have no "
+        "published return date. Not narrowed by the availability filter."
+    )
     st.dataframe(
-        display[[*available, "Fit"]].rename(columns=columns),
+        display[[*available, "Fit", "Back", "Why"]].rename(columns=columns),
         width="stretch",
         hide_index=True,
     )
