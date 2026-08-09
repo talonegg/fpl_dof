@@ -72,6 +72,24 @@ DAILY_SIGNAL_COLUMNS = (
     "recoveries",
     "defensive_contribution",
     "bps",
+    # The remaining observable BPS inputs, as season-to-date totals. Captured
+    # daily so per-gameweek values can be recovered by differencing, which
+    # makes the project self-sufficient rather than dependent on a third-party
+    # archive continuing to be maintained. Costs about 5MB a season.
+    "goals_scored",
+    "assists",
+    "clean_sheets",
+    "goals_conceded",
+    "own_goals",
+    "penalties_saved",
+    "penalties_missed",
+    "yellow_cards",
+    "red_cards",
+    "saves",
+    "bonus",
+    "starts",
+    "expected_goals",
+    "expected_assists",
     "total_points",
     "minutes",
 )

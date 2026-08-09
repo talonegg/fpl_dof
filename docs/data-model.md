@@ -65,7 +65,7 @@ Everything below follows from those two.
 | Artifact | Format | Where | Grain |
 |---|---|---|---|
 | gameweek snapshot | parquet + json | `data` branch, `gw NN/` | player, overwritten per gameweek |
-| daily signals | parquet | `data` branch, `daily/YYYY-MM-DD.parquet` | player × date, append-only |
+| daily signals | parquet | `data` branch, `daily/YYYY-MM-DD.parquet` | player × date, append-only, 56 KB/day |
 | local cache | parquet | `data/cache/`, gitignored | varies, disposable |
 | watchlist | json | `data/`, gitignored | player `code` |
 | model results | markdown | `docs/` | committed so numbers diff |
@@ -92,6 +92,9 @@ erDiagram
     PLAYER_SEASON ||--o{ PREDICTION : "is forecast by"
     GAMEWEEK ||--o{ PREDICTION : "for"
     PREDICTION }o--|| MODEL : "produced by"
+
+    APPEARANCE ||--o{ BPS_CONTRIBUTION : "earns"
+    BPS_ACTION ||--o{ BPS_CONTRIBUTION : "scores"
 
     PLAYER {
         int code PK "stable across seasons"
@@ -190,6 +193,19 @@ erDiagram
         float clean_sheet_probability
         float win_probability
     }
+    BPS_ACTION {
+        string action PK "38 rows, the official table"
+        float bps "value, positive or negative"
+        bool observable "16 true, 22 false"
+        string note "why it cannot be seen"
+    }
+    BPS_CONTRIBUTION {
+        string season PK
+        int element PK
+        int fixture_id PK
+        string action PK
+        float bps "derived, only for observable actions"
+    }
     MODEL {
         string name PK
         string config
@@ -222,6 +238,16 @@ compares models at different games.
 
 **`DAILY_SIGNAL` is the only append-only table.** Everything else can be
 rebuilt from its source; this one cannot be rebuilt at all.
+
+**`BPS_ACTION` is reference data, and it records what we cannot see.** Most
+reference tables list what exists; this one also carries `observable`, because
+the 22 unobservable actions are the reason a bonus model has a ceiling. It is
+exposed as a frame by `bps.action_table()` so "which scoring actions are
+invisible, and what are they worth" is a query rather than a docstring.
+
+**`BPS_CONTRIBUTION` is derived and deliberately unpersisted.** It is what
+`reconstruct()` computes on the fly; storing it would create a second thing to
+go stale, and it is only ever partial.
 
 ## Scoring inputs: what the model must capture
 
@@ -298,6 +324,23 @@ showing up as a number.
 
 **This is a ceiling, not a gap to close.** A bonus model built on this data
 sees about seven-eighths of BPS and should be described that way.
+
+### Where the BPS inputs live
+
+All 15 observable inputs are in the archive and the live API. The daily capture
+now carries them too, as season-to-date totals:
+
+| Layer | Coverage | Why |
+|---|---|---|
+| archive `merged_gw` | all 15, per fixture | the modelling substrate |
+| live `bootstrap` | all 15, season to date | what the app renders |
+| daily capture | all 15, season to date | **so per-gameweek values can be recovered by differencing** |
+
+That last row is the point of adding them. Differencing consecutive daily
+captures reproduces per-gameweek stats without the community archive, which is
+a third-party mirror that could stop being maintained at any time. It costs
+about 5 MB a season — 41 KB/day to 56 KB/day — to stop depending on it for the
+most important data in the project.
 
 ## Options for managing it
 

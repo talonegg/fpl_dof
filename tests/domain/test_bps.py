@@ -7,10 +7,12 @@ import pytest
 
 from fpl.domain.bps import (
     BPS_ACTIONS,
+    action_table,
     observable_actions,
     reconstruct,
     reconstruction_gap,
     unobservable_actions,
+    unobservable_weight,
 )
 
 
@@ -138,3 +140,35 @@ def test_the_reconstruction_tracks_published_bps_on_a_real_season():
     # overwhelmingly positive ones.
     assert reconstructed.sum() < published.sum()
     assert reconstructed.sum() / published.sum() > 0.80
+
+
+# --- The table as queryable data ---
+
+
+def test_the_action_table_has_a_row_per_action():
+    table = action_table()
+
+    assert len(table) == len(BPS_ACTIONS)
+    assert set(table.columns) == {"action", "bps", "observable", "note"}
+
+
+def test_the_table_can_be_queried_for_what_we_cannot_see():
+    """The question this exists to answer."""
+    table = action_table()
+    invisible = table[~table["observable"]]
+
+    assert len(invisible) == 22
+    assert "Key pass" in invisible["action"].tolist()
+
+
+def test_the_biggest_invisible_action_is_flagged_with_a_reason():
+    table = action_table()
+    penalty_goal = table[table["action"].str.contains("penalty, any position")].iloc[0]
+
+    assert not penalty_goal["observable"]
+    assert "split" in penalty_goal["note"]
+
+
+def test_unobservable_weight_is_the_absolute_bps_we_cannot_see():
+    assert unobservable_weight() > 0
+    assert unobservable_weight() == sum(abs(a.value) for a in unobservable_actions())

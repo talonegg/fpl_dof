@@ -169,3 +169,33 @@ def reconstruction_gap(appearances: pd.DataFrame) -> pd.Series:
     if appearances.empty or "bps" not in appearances.columns:
         return pd.Series(dtype="float64")
     return pd.to_numeric(appearances["bps"], errors="coerce") - reconstruct(appearances)
+
+
+def action_table() -> pd.DataFrame:
+    """The BPS table as data: one row per action, with its value and availability.
+
+    Exposed as a frame rather than only as constants so it can be joined,
+    filtered and displayed like anything else in the model — "which scoring
+    actions can we not see, and what are they worth" is a query, not a
+    docstring.
+    """
+    return pd.DataFrame(
+        [
+            {
+                "action": action.name,
+                "bps": action.value,
+                "observable": action.available,
+                "note": action.note,
+            }
+            for action in BPS_ACTIONS
+        ]
+    )
+
+
+def unobservable_weight() -> float:
+    """Total absolute BPS tied up in actions we cannot observe.
+
+    A crude but honest sense of scale: how much of the table is invisible,
+    regardless of how often each action occurs.
+    """
+    return float(sum(abs(action.value) for action in unobservable_actions()))

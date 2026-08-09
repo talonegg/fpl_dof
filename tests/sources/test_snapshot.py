@@ -172,3 +172,29 @@ def test_the_daily_capture_carries_the_stable_cross_season_code(tmp_path, bootst
     write_daily_signals(bootstrap, root=tmp_path, captured_on=date(2026, 8, 9))
 
     assert "code" in read_daily_signals(tmp_path).columns
+
+
+def test_the_daily_capture_carries_every_observable_bps_input(tmp_path, bootstrap):
+    """Differencing these recovers per-gameweek stats without the archive."""
+    write_daily_signals(bootstrap, root=tmp_path, captured_on=date(2026, 8, 9))
+
+    daily = read_daily_signals(tmp_path)
+
+    for column in (
+        "goals_scored",
+        "assists",
+        "clean_sheets",
+        "goals_conceded",
+        "own_goals",
+        "penalties_saved",
+        "penalties_missed",
+        "yellow_cards",
+        "red_cards",
+        "saves",
+        "tackles",
+        "clearances_blocks_interceptions",
+        "recoveries",
+        "minutes",
+        "bps",
+    ):
+        assert column in daily.columns, f"{column} missing from the daily capture"
