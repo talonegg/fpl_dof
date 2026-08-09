@@ -94,6 +94,12 @@ class SquadConstraints:
     must_include: tuple[int, ...] = ()
     must_exclude: tuple[int, ...] = ()
 
+    # Minimum spend. Unspent budget earns nothing, so a squad leaving money
+    # behind has usually mispriced someone rather than found a bargain --
+    # but forcing a spend can also buy a worse player, so this is optional and
+    # its effect is measured rather than assumed.
+    min_spend: float = 0.0
+
 
 class InfeasibleSquad(ValueError):
     """No legal squad exists for these players and constraints."""
@@ -158,6 +164,8 @@ def optimise_squad(players: pd.DataFrame, constraints: SquadConstraints | None =
     problem += pulp.lpSum(starting[e] for e in elements) == constraints.starting_size
     problem += pulp.lpSum(captain[e] for e in elements) == 1
     problem += pulp.lpSum(price[e] * squad[e] for e in elements) <= constraints.budget
+    if constraints.min_spend > 0:
+        problem += pulp.lpSum(price[e] * squad[e] for e in elements) >= constraints.min_spend
 
     for element in elements:
         problem += starting[element] <= squad[element]

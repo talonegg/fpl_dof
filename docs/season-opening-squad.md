@@ -74,7 +74,7 @@ weight(gw) = decay ^ (gw - 1)     for gw ≤ 10
 weight(gw) = 0                    for gw > 10
 ```
 
-With `decay = 0.78`, GW1 carries 1.00 and GW10 carries 0.09 — under a tenth of
+With `decay = 0.78`, GW1 carries 1.00 and GW10 carries 0.11 — roughly a ninth of
 the opening weight, which satisfies "immaterial" without a discontinuity that
 would make the model flip on a single fixture. The cliff at 10 is a hard
 truncation because the requirement is explicit; the decay does most of the work
@@ -430,51 +430,103 @@ that this can change without touching the model.
 | Promoted clubs | Prior-based; likely the largest single error source |
 | Five prior improvements did nothing | The base rate for this helping is not high |
 
-## 10. First results
+## 10. Results
 
-Stages 1, 2 and 6 are built. The pipeline was run with a deliberately simple
-expected-points vector, exactly as §10 recommended, and it produced a decisive
-negative result followed by a decisive correction.
+All of stages 1–6 are now built: cross-season blended rates, team defensive
+strength, a pre-season minutes forecaster, the component predictor, opening-run
+fixture difficulty, a minimum-spend constraint, and the backtest harness.
 
-**Share of the achievable ceiling, opening ten gameweeks:**
+**Share of the achievable ceiling over the opening ten gameweeks**, each squad
+picked using only seasons strictly before the one it plays in, at that season's
+own gameweek-1 prices:
 
-| Strategy | 2024-25 | 2025-26 |
-|---|---|---|
-| Hindsight (ceiling) | 100% | 100% |
-| **BlendedCareer + minutes** | **49.2%** | 45.2% |
-| PriorSeasonPoints (the heuristic) | 46.8% | **54.6%** |
-| Uninformed (floor) | 15.9% | 15.0% |
-| BlendedCareer, no minutes | 31.9% | **11.2%** |
+| Strategy | 2023-24 | 2024-25 | 2025-26 | Mean |
+|---|---|---|---|---|
+| Hindsight (ceiling) | 100% | 100% | 100% | 100% |
+| Components + fixtures | 54% | **64%** | 47% | **55%** |
+| BlendedCareer + minutes | **61%** | 61% | 43% | **55%** |
+| Components | 48% | 58% | 49% | 52% |
+| PriorSeasonPoints (the heuristic) | 49% | 47% | **55%** | 50% |
+| BlendedCareer, no minutes | 21% | 25% | 11% | 19% |
+| Uninformed (floor) | 19% | 16% | 15% | 17% |
 
-### The finding: rates without minutes are worse than useless
+### Minutes are the finding. Everything else is a rounding error beside them.
 
-The first version used blended per-90 rates with a constant minutes
-assumption. In 2025-26 it scored **11.2% of the ceiling — below picking a legal
-squad at random**.
-
-The diagnosis was unambiguous. Its fifteen players played **1,121 minutes**
-across the opening run; the naive heuristic's played **10,234**. It bought
-high-rate players who do not play, and spent only £76m of the £100m available.
+The first version used blended per-90 rates with a constant minutes assumption.
+In 2025-26 it scored **11% of the ceiling — below picking a legal squad at
+random**. Its fifteen players played **1,121 minutes** across the opening run
+where the naive heuristic's played **10,234**. It bought high-rate players who
+do not play, and spent only £76m of the £100m available.
 
 A per-90 rate says how good a player is *while on the pitch*. Multiplying it by
-a constant treats a 20-minute substitute as a starter. Prior-season totals
+a constant treats a twenty-minute substitute as a starter. Prior-season totals
 implicitly carry minutes, which is precisely why the unsophisticated heuristic
 beat the sophisticated blend.
 
-Adding a minutes term from career history lifted the same model from 31.9% to
-49.2% in one season and from 11.2% to 45.2% in the other.
+Adding a minutes forecast took the same model from **19% to 55%** on the
+three-season mean. No other change in this project has moved a number that far.
 
-### Where that leaves it
+### The full budget constraint is inert, and that is itself the answer
 
-**One win, one loss against the obvious heuristic.** Two observations, no
-significance, and the design said in advance that this test can rule a model
-out but cannot establish one. It has not been established.
+`SquadConstraints.min_spend` was added so a squad could be forced to consume the
+whole £100m. Measured, it changes **nothing**: every strategy with a minutes
+term already spends £100.0m without being told to.
 
-What it *has* done, for a day's work rather than a week's, is prove the
-pipeline end to end and identify the single largest term before any of the
-sophisticated modelling was written. The clean-sheet, defensive-contribution
-and BPS components described in §3 are all still unbuilt — and the evidence now
-says none of them will matter as much as getting minutes right.
+Underspending was never a separate problem to fix. It was a *symptom* of the
+missing minutes term — a model that rates bench players highly buys cheap bench
+players and cannot find anything to do with the rest of the money. Fix the
+cause and the symptom goes with it. The constraint stays because it is correct
+and costs nothing, not because it earned its place.
+
+### Components and fixtures: not established, either way
+
+The component model (goals by position, assists, clean sheets from the club a
+player is joining, bonus, finishing adjustment) scores **52%** against the
+simple minutes model's **55%**. Adding fixture difficulty lifts it to **55%** —
+a dead heat with the far simpler thing.
+
+Neither is consistent. Fixtures help in two seasons and hurt in the third; the
+component model beats the simple one in one season of three. Opening-run
+difficulty spans a narrow band across clubs, so it perturbs the ranking by about
+as much as it adds noise, and three squads cannot separate those.
+
+**So fixture weighting is off by default** and the caller opts in
+(`expected_points_from_components(..., use_fixtures=True)`). The requirement
+asked for it, it is built, tested and available; what the evidence does not
+support is switching it on silently.
+
+### A gap the numbers above do not show: a third of the pool is invisible
+
+Of the 690 players priced in gameweek 1 of 2025-26, **239 (35%) carry no prior
+Premier League minutes** and therefore get no expected points at all. They are
+silently dropped before the optimiser sees them. **160 of the 239 are under
+£5m** — precisely the bench slots a real squad has to fill.
+
+This is larger than the 15% quoted in §2, which counted a different population
+(the current API's 573 selectable players rather than every priced entry in the
+archive). Both numbers are right about what they measure; the one that matters
+for this model is 35%.
+
+The design (§2, §5) calls for a position-and-price prior for these players.
+**That is specified and not yet built.** Dropping them is the conservative
+choice — inventing a rate would let the optimiser buy an unknown on a guess —
+but it is a real restriction on the search space, not a neutral default, and
+the backtest results above were produced under it.
+
+### The honest bottom line
+
+On the three-season mean the best model captures **55%** of the ceiling against
+the obvious heuristic's **50%**. But on **2025-26 — the only season played under
+the current scoring rules — the heuristic wins outright**, and every model here
+loses to it.
+
+That is the same shape this project has hit repeatedly: pooled results and
+current-rules results disagree, and the pooled mean flatters the model. Three
+squads is not a sample. The design said in advance that this test can rule a
+model out but cannot establish one, and nothing here establishes one.
+
+What it has done is locate the binding constraint. It is minutes, and it is not
+close.
 
 ## 11. Recommendation
 

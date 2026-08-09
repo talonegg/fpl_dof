@@ -41,7 +41,8 @@ def team_match_defence(season: pd.DataFrame) -> pd.DataFrame:
     reflects the team's total. The maximum across those players is the team
     figure.
     """
-    if season.empty or "team_name" not in season.columns:
+    required = {"team_name", "gameweek", "minutes", "goals_conceded"}
+    if season.empty or not required <= set(season.columns):
         return pd.DataFrame()
 
     played = season[season["minutes"] >= FULL_APPEARANCE_MINUTES]
@@ -140,8 +141,15 @@ def estimate_promoted_prior(
 
     newcomer_rates = []
     for earlier, later in zip(seasons, seasons[1:], strict=False):
-        before = set(season_defence(season_data[earlier])["team_name"])
+        previous = season_defence(season_data[earlier])
         after = season_defence(season_data[later])
+        # A season the archive cannot supply a defence table for tells us
+        # nothing about who was promoted into the next one. Skip the pair
+        # rather than reading a column that is not there.
+        if previous.empty or after.empty:
+            continue
+
+        before = set(previous["team_name"])
         newcomers = after[~after["team_name"].isin(before)]
         if "expected_goals_conceded_per_match" in newcomers.columns:
             newcomer_rates.extend(newcomers["expected_goals_conceded_per_match"].tolist())
@@ -201,3 +209,89 @@ def clean_sheet_outlook(
             }
         )
     return pd.DataFrame(rows)
+
+
+def opponent_names(season: pd.DataFrame) -> pd.DataFrame:
+    """Resolve each club's opponent per gameweek to a club *name*.
+
+    ``opponent_team`` is a numeric id whose mapping to names is not published
+    in the archive. It is recoverable anyway: both clubs in a match share a
+    ``fixture`` id, so a club's opponent is simply the other name against that
+    fixture.
+    """
+    if season.empty or "fixture" not in season.columns:
+        return pd.DataFrame(columns=["team_name", "gameweek", "opponent_name"])
+
+    sides = season.groupby(["fixture", "team_name"], as_index=False)["gameweek"].first()
+
+    rows = []
+    for fixture, group in sides.groupby("fixture"):
+        clubs = group["team_name"].tolist()
+        if len(clubs) != 2:
+            continue
+        gameweek = int(group["gameweek"].iloc[0])
+        rows.append(
+            {
+                "team_name": clubs[0],
+                "gameweek": gameweek,
+                "opponent_name": clubs[1],
+                "fixture": fixture,
+            }
+        )
+        rows.append(
+            {
+                "team_name": clubs[1],
+                "gameweek": gameweek,
+                "opponent_name": clubs[0],
+                "fixture": fixture,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def opening_run_difficulty(
+    season: pd.DataFrame,
+    attack: pd.DataFrame,
+    horizon: int = 10,
+    decay: float = 0.78,
+) -> pd.DataFrame:
+    """How kind each club's opening fixtures are, weighted towards the near ones.
+
+    Returns a multiplier centred on 1.0: above 1 means an easier-than-average
+    start. Gameweek 1 carries full weight and gameweek 10 about a tenth, which
+    is the shape the requirement asks for — the opening fixtures decide the
+    opening squad, and gameweek 11 onwards should not.
+
+    Difficulty is the opponent's *attacking* strength: the goals a club
+    concedes to an average side, taken from ``attack`` keyed by club name.
+    """
+    columns = ["team_name", "opening_difficulty"]
+    schedule = opponent_names(season)
+    if schedule.empty or attack.empty:
+        return pd.DataFrame(columns=columns)
+
+    window = schedule[schedule["gameweek"] <= horizon].copy()
+    if window.empty:
+        return pd.DataFrame(columns=columns)
+
+    strength = attack.set_index("team_name")["expected_goals_conceded_per_match"]
+    league_mean = float(strength.mean())
+    if league_mean <= 0:
+        return pd.DataFrame(columns=columns)
+
+    # An opponent who concedes a lot is an easy fixture.
+    window["opponent_leakiness"] = window["opponent_name"].map(strength).fillna(league_mean)
+    window["weight"] = decay ** (window["gameweek"] - 1)
+
+    rows = []
+    for club, group in window.groupby("team_name"):
+        weight = group["weight"].sum()
+        if weight <= 0:
+            continue
+        weighted = float((group["opponent_leakiness"] * group["weight"]).sum() / weight)
+        rows.append({"team_name": club, "opening_difficulty": weighted / league_mean})
+
+    return (
+        pd.DataFrame(rows).sort_values("opening_difficulty", ascending=False).reset_index(drop=True)
+    )

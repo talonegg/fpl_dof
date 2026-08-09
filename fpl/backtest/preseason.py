@@ -27,6 +27,12 @@ import pandas as pd
 from fpl.domain.identity import add_match_key
 from fpl.domain.positions import display_name
 from fpl.features.career import blend_career_rates, shrink_towards_prior
+from fpl.features.team_strength import (
+    blend_team_defence,
+    estimate_promoted_prior,
+    opening_run_difficulty,
+)
+from fpl.models.preseason import PreseasonPredictor
 from fpl.optimise.squad import InfeasibleSquad, SquadConstraints, optimise_squad
 
 OPENING_GAMEWEEK = 1
@@ -112,15 +118,11 @@ def build_pool(prior_seasons: dict[str, pd.DataFrame], prices: pd.DataFrame) -> 
         return pd.DataFrame()
 
     career = shrink_towards_prior(career)
-    columns = [
-        "match_key",
-        "total_points_per_90",
-        "confidence",
-        "career_minutes",
-        "seasons_seen",
-    ]
-    available = [column for column in columns if column in career.columns]
-    return prices.merge(career[available], on="match_key", how="left")
+    # Carry every career column, not a chosen subset. A component model needs
+    # the underlying rates and the appearance counts, and picking columns here
+    # silently starved the minutes forecaster of its inputs.
+    drop = [column for column in ("player_name", "last_club") if column in career.columns]
+    return prices.merge(career.drop(columns=drop), on="match_key", how="left")
 
 
 def expected_points_from_history(
@@ -178,6 +180,47 @@ def expected_points_with_minutes(
     minutes_per_gameweek = (minutes.fillna(0) / span).clip(0, 90)
 
     return (rate.fillna(0.0) * minutes_per_gameweek / 90.0 * horizon).clip(lower=0)
+
+
+def expected_points_from_components(
+    pool: pd.DataFrame,
+    prior_seasons: dict[str, pd.DataFrame],
+    horizon: int = DEFAULT_HORIZON,
+    use_fixtures: bool = False,
+) -> pd.Series:
+    """Points expected over the opening run from the component model.
+
+    The full stack the design asks for: blended career rates, a pre-season
+    minutes forecast, and clean sheets taken from the club the player will play
+    for next season rather than from their own history.
+
+    ``use_fixtures`` applies opening-run difficulty. It is **off by default
+    because it measured worse in both testable seasons** — see §10. The
+    parameter stays so the question can be reopened against a third season.
+    """
+    if pool.empty:
+        return pd.Series(dtype="float64")
+
+    defence = blend_team_defence(prior_seasons)
+    model = PreseasonPredictor(
+        horizon=horizon,
+        team_defence=defence,
+        promoted_prior=estimate_promoted_prior(prior_seasons),
+    )
+
+    difficulty = None
+    if use_fixtures and prior_seasons:
+        latest = prior_seasons[max(prior_seasons)]
+        ratings = opening_run_difficulty(latest, defence, horizon=horizon)
+        if not ratings.empty:
+            lookup = ratings.set_index("team_name")["opening_difficulty"]
+            difficulty = pool["team"].map(lookup).fillna(1.0)
+
+    predictions = model.predict(pool, fixture_difficulty=difficulty)
+    if predictions.empty:
+        return pd.Series(0.0, index=pool.index)
+
+    return pd.Series(predictions["expected_points"].to_numpy(), index=pool.index)
 
 
 def pick_squad(
@@ -327,6 +370,8 @@ def compare_strategies(
     if not prior:
         return pd.DataFrame()
 
+    pool = build_pool(prior, opening_prices(season))
+
     results = [
         run_strategy(target, season, prior, "BlendedCareer", horizon=horizon),
         run_strategy(
@@ -334,9 +379,23 @@ def compare_strategies(
             season,
             prior,
             "BlendedCareer+Minutes",
-            expected=expected_points_with_minutes(
-                build_pool(prior, opening_prices(season)), horizon
-            ),
+            expected=expected_points_with_minutes(pool, horizon),
+            horizon=horizon,
+        ),
+        run_strategy(
+            target,
+            season,
+            prior,
+            "Components",
+            expected=expected_points_from_components(pool, prior, horizon),
+            horizon=horizon,
+        ),
+        run_strategy(
+            target,
+            season,
+            prior,
+            "Components+Fixtures",
+            expected=expected_points_from_components(pool, prior, horizon, use_fixtures=True),
             horizon=horizon,
         ),
         prior_points_squad(target, season, prior, horizon),

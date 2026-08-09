@@ -116,6 +116,21 @@ field and the best selector, and every model that ranks better picks worse. Rank
 correlation is dominated by the many players who score nothing; the top fifteen is
 a question about the tail. Optimising ranking has so far made selection worse.
 
+**Minutes are the binding constraint on squad selection, not points modelling.**
+The season-opening backtest is unambiguous: the same model went from 19% of the
+achievable ceiling to 55% purely by adding a minutes forecast, while every
+refinement on top of that — component scoring, fixture difficulty, forcing the
+full budget — moved it by a few points at most and none of them consistently.
+A per-90 rate says how good a player is *while on the pitch*; multiplied by a
+constant it buys substitutes. `fpl/models/minutes_forecast.py:PreseasonMinutes`
+is the pre-season case. See `docs/season-opening-squad.md` §10.
+
+**Forcing the full budget does nothing — it was a symptom, not a cause.**
+`SquadConstraints.min_spend` exists and is correct, but every strategy with a
+minutes term already spends £100.0m unprompted. Underspending was what a model
+that over-rates bench players looks like, not a separate defect to constrain
+away.
+
 **Expected points and optimisation stay separate.** The predictor answers "how many
 points will this player score in GW N". The optimiser answers "given those numbers
 and the FPL rules, what is the best squad". Never let a heuristic about budget or

@@ -192,15 +192,18 @@ def finishing_multiplier(
     streaks do not — so a player 40% above their expected goals is credited
     about 10%, not 40%.
     """
-    if career.empty or "goals_scored_per_90" not in career.columns:
+    if career.empty:
         return pd.Series(dtype="float64")
 
+    # "No adjustment" is a multiplier of 1, not an empty series. Returning
+    # nothing here silently turned every downstream product into NaN.
     expected = career.get("expected_goals_per_90")
-    if expected is None:
+    scored = career.get("goals_scored_per_90")
+    if expected is None or scored is None:
         return pd.Series(1.0, index=career.index)
 
     safe = expected.where(expected > 0)
-    ratio = (career["goals_scored_per_90"] - safe) / safe
+    ratio = (scored - safe) / safe
     return (1 + shrink * ratio.fillna(0.0)).clip(*bounds)
 
 
