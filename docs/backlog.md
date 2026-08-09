@@ -30,11 +30,25 @@ aggregation, team defensive strength, and the backtest harness, then run the
 quantity before any new modelling exists — and if it cannot beat the template
 squad, the sophisticated version will not either.
 
-Two constraints found while designing it:
+Four known data gaps, each behind a named estimator seam so that closing one
+later is swapping an implementation rather than editing the model:
+
+| Seam | v1 | Closed by |
+|---|---|---|
+| `DefensiveEstimator` | BPS-residual proxy (1.7–2.6× lift, validated) | 2026-27 completing |
+| `TeamStrengthEstimator` | blended xGC + promoted prior | odds, once a key exists |
+| `MinutesEstimator` | prior-season share | a season of daily captures |
+| `NewPlayerEstimator` | price-band prior | Transfermarkt, if ever justified |
+
+**The first three need no new scraping** — they arrive from data this project
+already collects or is entitled to. That ordering is deliberate.
+
+Two limits worth knowing before starting:
 
 - **Defensive contribution inputs exist for one season only.** CBI, tackles and
   recoveries arrived with the rule in 2025-26, so the requested multi-season
-  weighting is impossible for that component until 2026-27 completes.
+  weighting is impossible for that component. The BPS residual is a partial
+  workaround, not a substitute.
 - **Only three seasons are backtestable**, giving three squads. The backtest can
   rule out a bad model; it cannot establish a good one.
 

@@ -150,7 +150,7 @@ machinery already in `features/market.py`.
 ### 3.6 Defensive contributions
 
 Constrained by data, as noted. **External sources were investigated and none is
-usable** — see §9. A partial workaround exists: a BPS-residual proxy that
+usable** — see §8. A partial workaround exists: a BPS-residual proxy that
 recovers a weak signal for pre-2025-26 seasons. From the single season of real
 data:
 
@@ -221,33 +221,99 @@ modelling improvements have failed to move selection significantly.** The
 prior for "a more sophisticated optimiser objective will help" should be low,
 and the test should be cheap before the build is expensive.
 
-## 5. Implementation plan
+## 5. Estimator seams: where the known gaps plug in
 
-Five stages, each independently testable. Stop early if the evidence says so.
+Four gaps are known and none of them is closable today. Rather than hard-code
+around them, each becomes a **named estimator with a protocol**, so closing a
+gap later is swapping an implementation rather than editing the model.
+
+This is the same pattern already proven twice in this codebase: the derivation
+catalogue in `features/registry.py` and the view catalogue in `app/registry.py`.
+Both turned "edit the call site and remember the rules" into "add an entry".
+
+```python
+class RateEstimator(Protocol):
+    """Estimates a per-90 rate for a player from whatever it can see."""
+    name: str
+    def estimate(self, player_history: pd.DataFrame) -> pd.Series: ...
+    def confidence(self, player_history: pd.DataFrame) -> pd.Series: ...
+```
+
+`confidence` is not decoration. It is what lets the optimiser's risk-adjusted
+objective discount a player whose estimate rests on a proxy or a price band,
+and it is what makes a v1 with weak estimators safe to ship.
+
+### The four seams
+
+| Seam | v1 implementation | Closes when | Swap cost |
+|---|---|---|---|
+| `DefensiveEstimator` | 2025-26 actuals; BPS-residual proxy before that | 2026-27 completes, giving two real seasons | One class |
+| `NewPlayerEstimator` | Price-band prior by position | Transfermarkt ingest, if ever justified | One class |
+| `TeamStrengthEstimator` | Blended xGC, promoted-club prior | Odds-implied strength once `ODDS_API_KEY` exists | One class |
+| `MinutesEstimator` | Prior-season share + injury status | A second season of daily captures | One class |
+
+Each ships with the weakest honest implementation and a test asserting the
+protocol holds, so the successor has a contract to satisfy rather than a shape
+to guess at.
+
+### Registry, not conditionals
+
+```python
+ESTIMATORS = {
+    "defensive": BpsResidualDefensive(),      # -> ActualCbitDefensive() in v2
+    "new_player": PriceBandPrior(),           # -> ForeignLeaguePrior() if justified
+    "team_strength": BlendedConcession(),     # -> MarketImpliedStrength() with a key
+    "minutes": PriorSeasonMinutes(),          # -> CapturedMinutes() after a season
+}
+```
+
+The model composes whatever is registered and reports which estimator produced
+each term. When a squad recommendation looks wrong, the first question is which
+estimator to blame — and that should be answerable without reading the code.
+
+### Provenance travels with the number
+
+Every player carries the estimator that produced each component, so the output
+can distinguish "4.2 expected points, all from real data" from "4.2 expected
+points, defensive term from a proxy and minutes from a price band". Those are
+very different recommendations and the current design would otherwise present
+them identically.
+
+## 6. Implementation plan
+
+Six stages. **Stages 1, 2 and 6 come first** — they test the pipeline against
+a known quantity before any new modelling exists, so a negative result costs a
+day rather than a week.
 
 ### Stage 1 — Cross-season aggregation (`fpl/features/career.py`)
-Blend per-player rates across seasons with the minutes-weighted scheme.
-Handle the 40% who do not carry over. **Test:** rates for a known ever-present
-match a hand computation; a player with one thin season is not dominated by it.
+Minutes-weighted blending of per-90 rates across seasons. Handles the 40% who
+do not carry over by returning NaN and a confidence of zero, never a guess.
+**Test:** an ever-present matches a hand computation; one thin season does not
+dominate a heavy one.
 
 ### Stage 2 — Team strength (`fpl/features/team_strength.py`)
-Per-club blended xGC and xG, with a promoted-club prior. **Test:** the
-2.6× spread reproduces; a transferred player's clean-sheet expectation moves
-with their new club, not their old.
+`TeamStrengthEstimator` seam. Blended xGC per club, promoted-club prior.
+**Test:** the 2.6× spread reproduces; a transferred player's clean-sheet
+expectation follows their new club, not their old.
 
-### Stage 3 — Season-opening predictor (`fpl/models/preseason.py`)
-Compose 3.4–3.8 into a `Predictor`, plus per-player uncertainty. **Test:**
-component-by-component against hand-worked cases, as `ComponentPredictor` is.
+### Stage 3 — Estimator seams (`fpl/models/estimators.py`)
+The four protocols and their v1 implementations, including the BPS-residual
+defensive proxy validated in §8. **Test:** each satisfies its protocol; each
+reports lower confidence when working from a proxy than from real data.
 
-### Stage 4 — Fixture-weighted horizon (`fpl/features/opening_run.py`)
-Apply the decay across GW1–10 using the published fixture list. **Test:** a
-club with an easy opening run outranks an equal club with a hard one; GW11+
-changes nothing.
+### Stage 4 — Season-opening predictor (`fpl/models/preseason.py`)
+Composes §3.4–3.8 through the registry, emitting expected points, confidence
+and per-component provenance. **Test:** component-by-component against
+hand-worked cases, as `ComponentPredictor` is.
 
-### Stage 5 — Backtest (`fpl/backtest/preseason.py`)
-The stage that decides whether any of it was worth building.
+### Stage 5 — Fixture-weighted opening run (`fpl/features/opening_run.py`)
+The GW1–10 decay applied to the published fixture list. **Test:** an easy
+opening run outranks an equal club with a hard one; GW11+ changes nothing.
 
-## 6. Backtest design
+### Stage 6 — Backtest (`fpl/backtest/preseason.py`)
+The stage that decides whether any of the rest was worth building.
+
+## 7. Backtest design
 
 **Now possible** because GW1 prices exist for all four seasons.
 
@@ -275,23 +341,119 @@ observations. That is a very small sample and no significance test will rescue
 it. The backtest can rule out a bad model; it cannot establish a good one.
 Treat a positive result as permission to use it, not as proof it works.
 
-## 7. Honest risks
+### Testing the seams separately
+
+Because the gaps are behind estimators, each can be ablated:
+
+| Ablation | Question it answers |
+|---|---|
+| BPS-residual proxy vs no defensive term | Is the weak proxy better than nothing? |
+| Price-band prior vs excluding new players | Do the 87 unmodelled players cost anything? |
+| Promoted-club prior vs league average | How much does the promoted case matter? |
+
+Three observations cannot support a *ranking* of these, but they can show
+whether any is actively harmful — which is the question that matters before a
+future release invests in closing that gap.
+
+## 8. External sources investigated
+
+### For pre-2025-26 defensive statistics
+
+The FPL API is the constraint, not the mirror. CBIT arrived with the rule in
+2025-26, so **every FPL-derived source has the same wall** — verified against
+`FPL-Core-Insights`, whose defensive columns exist for 2025-2026 and whose
+earlier-season files 404.
+
+Opta-derived sources do have the data historically. None is usable:
+
+| Source | Has pre-2025-26 CBIT | Usable | Why |
+|---|---|---|---|
+| FBref | yes | **no** | 403 Cloudflare challenge, even on `robots.txt` |
+| Sofascore | yes | **no** | 403 on `robots.txt` |
+| WhoScored | yes | **no** | `robots.txt` permits, but it is Opta's own property and its terms do not |
+| StatsBomb open data | — | **no** | Premier League coverage is 2003/04 and 2015/16 only |
+| SportMonks and similar | yes | paid | A commercial licence, not a free tier |
+
+**No free, permitted source exists.**
+
+### The BPS-residual proxy
+
+Defensive actions *are* scored inside BPS — clearances at 1 per 2, tackles at 2
+each, recoveries at 1 per 3 — and BPS is published for every season. The
+residual after reconstructing the non-defensive components therefore carries a
+defensive signal even where the raw counts are absent.
+
+Validated on 2025-26, where both sides are known:
+
+| Position | Correlation with actual DC | Top-30 DC rate | Everyone else | Lift |
+|---|---|---|---|---|
+| Defenders | 0.457 | 38% | 23% | **1.7×** |
+| Midfielders | 0.669 | 33% | 13% | **2.6×** |
+| Forwards | 0.504 | — | — | — |
+
+**A weak prior, not a substitute.** It finds the defensively busy players
+roughly twice as well as chance, which is worth having where the alternative is
+nothing. It must never be presented as a measurement, and real 2025-26 data
+always overrides it. This is the v1 `DefensiveEstimator`.
+
+### For players with no Premier League history
+
+| Source | Offers | Permitted | Verdict |
+|---|---|---|---|
+| **Transfermarkt** | appearances, goals, assists, minutes, fee, age | `robots.txt` empty | **Viable, best option** |
+| worldfootball.net | appearances, goals across leagues | `Allow: /` | Viable fallback |
+| FBref | xG, xA, defensive stats for most leagues | **no** — Cloudflare | Would have been ideal |
+
+**Partially yes.** Basic productivity is obtainable within terms. Underlying
+statistics are **not**, because the source that has them is the one that blocks
+access. So an incoming player can be given a *rate* prior but not the xG-based
+treatment everyone else gets — two estimators for two populations, flagged in
+the output rather than blended silently.
+
+A league-strength discount would also be needed, and its multipliers must come
+from published research: this project has no data to fit them, and inventing
+them would be worse than omitting them.
+
+**v1 does not scrape.** All 87 unmodelled players are under £7m and 68 under
+£5m, so a price-band prior is adequate. The `NewPlayerEstimator` seam exists so
+that this can change without touching the model.
+
+## 9. Honest risks
 
 | Risk | Assessment |
 |---|---|
 | Three test observations | The real limit. Design decisions cannot be tuned on this without overfitting |
-| DC from one season | Unavoidable until 2026-27 completes |
+| DC from one season | Mitigated by the proxy, closed when 2026-27 completes |
 | 15% of players unmodellable | Contained: 78% of them are under £5m |
-| Promoted clubs | Prior-based; will be the largest single error source |
+| Promoted clubs | Prior-based; likely the largest single error source |
 | Five prior improvements did nothing | The base rate for this helping is not high |
 
-## 8. Recommendation
+## 10. Recommendation
 
-Build stages 1, 2 and 5 first — cross-season rates, team strength, and the
-backtest harness — then run the **existing** `ComponentPredictor` through it
-with blended prior-season inputs. That tests the whole pipeline against a
-known quantity before any new modelling exists.
+Build **stages 1, 2 and 6** first — cross-season rates, team strength, and the
+backtest harness — then run the **existing** `ComponentPredictor` through the
+pipeline with blended prior-season inputs.
 
-If that pipeline cannot beat the template squad, the sophisticated version
-will not either, and the finding arrives after a day's work rather than a
-week's.
+That tests the whole pipeline against a known quantity before any new modelling
+exists. If it cannot beat the template squad, the sophisticated version will
+not either, and the finding arrives after a day's work rather than a week's.
+
+The estimator seams mean the weak v1 implementations are not throwaway work:
+each is a contract a stronger implementation can satisfy later, and each
+reports its own confidence so the optimiser already knows which numbers to
+trust.
+
+### What a future release closes, in order of expected value
+
+1. **Real defensive data** once 2026-27 completes — replaces the proxy, and
+   needs no new source.
+2. **Odds-implied team strength** once a key exists — the market prices
+   promotion and squad changes better than a blended average can.
+3. **Captured minutes** after a season of daily snapshots — the forecaster
+   already exists and only lacks history.
+4. **Foreign-league priors** — last, and only if an expensive signing ever
+   needs rating.
+
+Note that the first three need **no new scraping**: they arrive from data this
+project already collects or is already entitled to. That ordering is
+deliberate.
