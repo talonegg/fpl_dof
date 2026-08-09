@@ -15,10 +15,12 @@ move it to `fpl/` and write a test for it.
 ## Layout
 
 ```
-streamlit_app.py        Entry point. Must stay at the repo root -- Streamlit puts
-                        the entry script's directory on sys.path, which is what
-                        makes `import fpl` work on Streamlit Cloud with no install.
-app/                    Streamlit UI only. Pages, widgets, layout, caching wrappers.
+streamlit_app.py        Entry point. Composes only -- it does not decide. Must stay
+                        at the repo root: Streamlit puts the entry script's
+                        directory on sys.path, which is what makes `import fpl`
+                        work on Streamlit Cloud with no install.
+app/                    Streamlit UI only. Tabs are registered in app/registry.py;
+                        each declares which filters it honours.
 fpl/
   sources/              Fetching raw data. Must not import domain -- a fetcher
                         returns bytes, it does not know what a player is.
@@ -175,6 +177,13 @@ The app is used on laptop, tablet, and phone. Assume a 375px-wide viewport works
 Data tables get a curated narrow column set on small screens. Prefer `st.tabs`
 and vertical stacking over wide multi-column layouts. Test any new page at phone
 width before considering it done.
+
+### Adding a tab
+
+One entry in `app/registry.py` and one render function taking a `ViewContext`.
+Do not edit `streamlit_app.py`. The view declares which filters it honours and
+is handed an already-filtered frame, so the contract below is structural rather
+than something to remember.
 
 ### Filters
 
