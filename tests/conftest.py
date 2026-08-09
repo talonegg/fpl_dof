@@ -85,3 +85,14 @@ def fake_fetcher(bootstrap, fixtures_snapshot):
         raise AssertionError(f"unexpected URL requested in a test: {url}")
 
     return fetch
+
+
+@pytest.fixture
+def odds_payload() -> Any:
+    """A hand-built odds payload matching The Odds API's documented schema.
+
+    Not a live capture: the free tier needs a key, and this project has none
+    configured. It is shaped like the real thing and exercises every branch,
+    but it has never been checked against a real response.
+    """
+    return load_fixture("odds_sample.json")
