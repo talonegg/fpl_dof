@@ -62,6 +62,15 @@ def fetch_season_gameweeks(season: str, reader: CsvReader = _read_csv) -> pd.Dat
     df = df.rename(columns=COLUMN_RENAMES)
     df["season"] = season
 
+    # The archive contains exact duplicate rows for at least one player per
+    # season -- the same appearance recorded twice. Everything downstream sums
+    # per gameweek, so left alone they double that player's points: 113 becomes
+    # 140 for Junior Kroupi in 2025-26. A genuine double gameweek shares an
+    # element but has a different fixture, so keying on both removes the
+    # duplicates and preserves the doubles.
+    if {"element", "fixture"} <= set(df.columns):
+        df = df.drop_duplicates(subset=["element", "fixture"], keep="first")
+
     if "value" in df.columns:
         df["price"] = df["value"] / 10
     if "gameweek" in df.columns:

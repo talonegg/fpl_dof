@@ -96,3 +96,15 @@ def odds_payload() -> Any:
     but it has never been checked against a real response.
     """
     return load_fixture("odds_sample.json")
+
+
+@pytest.fixture
+def archive_schema() -> dict[str, list[str]]:
+    """The real column list of each usable archive season.
+
+    A committed snapshot rather than a download, so schema checks stay offline.
+    It doubles as a contract test: the archive changed from 43 to 51 columns
+    between seasons once already, and a silent change is how a model starts
+    reading a column that is no longer there.
+    """
+    return load_fixture("archive_schema.json")

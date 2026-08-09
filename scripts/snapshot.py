@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fpl.sources.fpl_api import fetch_bootstrap, fetch_fixtures  # noqa: E402
-from fpl.sources.snapshot import (  # noqa: E402
+from fpl.store.snapshot import (  # noqa: E402
     captured_dates,
     write_daily_signals,
     write_snapshot,

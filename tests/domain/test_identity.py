@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from fpl.domain.identity import (
     add_match_key,
     ambiguous_names,
+    match_across_seasons,
     match_rate,
     match_to_current_players,
     normalise_name,
@@ -189,3 +191,114 @@ def test_players_with_no_usable_name_do_not_match_each_other():
 
 def test_no_collisions_means_nothing_to_report():
     assert ambiguous_names(PLAYERS) == []
+
+
+# --- Matching between any two seasons, not just onto the current one ---
+
+SEASON_A = pd.DataFrame(
+    [
+        {"player_name": "Bukayo Saka", "element": 10},
+        {"player_name": "Aarón Anselmino", "element": 20},
+        {"player_name": "Departed Player", "element": 30},
+    ]
+)
+SEASON_B = pd.DataFrame(
+    [
+        {"player_name": "Bukayo Saka", "element": 400},
+        {"player_name": "Aaron Anselmino", "element": 500},
+        {"player_name": "New Signing", "element": 600},
+    ]
+)
+
+
+def test_players_are_matched_between_two_seasons():
+    result = match_across_seasons(SEASON_A, SEASON_B)
+
+    assert result.matched == 2
+
+
+def test_the_element_ids_differ_between_the_seasons():
+    """The whole reason this function exists."""
+    result = match_across_seasons(SEASON_A, SEASON_B)
+    saka = result.pairs[result.pairs["name_left"] == "Bukayo Saka"].iloc[0]
+
+    assert saka["left"] == 10
+    assert saka["right"] == 400
+
+
+def test_accents_do_not_prevent_a_match():
+    result = match_across_seasons(SEASON_A, SEASON_B)
+
+    assert "aaron anselmino" in result.pairs["match_key"].tolist()
+
+
+def test_a_player_who_left_is_reported_not_dropped_silently():
+    result = match_across_seasons(SEASON_A, SEASON_B)
+
+    assert result.unmatched_left == ["Departed Player"]
+
+
+def test_a_new_arrival_is_reported_too():
+    result = match_across_seasons(SEASON_A, SEASON_B)
+
+    assert result.unmatched_right == ["New Signing"]
+
+
+def test_coverage_is_the_share_of_the_left_season_matched():
+    result = match_across_seasons(SEASON_A, SEASON_B)
+
+    assert result.coverage == pytest.approx(2 / 3)
+
+
+def test_a_duplicated_name_is_excluded_and_reported():
+    left = pd.DataFrame(
+        [
+            {"player_name": "Danny Ward", "element": 1},
+            {"player_name": "Danny Ward", "element": 2},
+        ]
+    )
+    right = pd.DataFrame([{"player_name": "Danny Ward", "element": 9}])
+
+    result = match_across_seasons(left, right)
+
+    assert result.matched == 0
+    assert result.ambiguous == ["Danny Ward"]
+
+
+def test_an_ambiguity_on_either_side_blocks_the_match():
+    left = pd.DataFrame([{"player_name": "Danny Ward", "element": 1}])
+    right = pd.DataFrame(
+        [
+            {"player_name": "Danny Ward", "element": 8},
+            {"player_name": "Danny Ward", "element": 9},
+        ]
+    )
+
+    result = match_across_seasons(left, right)
+
+    assert result.matched == 0
+    assert result.ambiguous == ["Danny Ward"]
+
+
+def test_repeated_rows_for_one_player_do_not_look_ambiguous():
+    """Archive frames have a row per gameweek; that is not two players."""
+    left = pd.DataFrame([{"player_name": "Bukayo Saka", "element": 10}] * 38)
+    right = pd.DataFrame([{"player_name": "Bukayo Saka", "element": 400}] * 38)
+
+    result = match_across_seasons(left, right)
+
+    assert result.matched == 1
+    assert result.ambiguous == []
+
+
+def test_matching_nothing_is_safe():
+    empty = pd.DataFrame(columns=["player_name", "element"])
+
+    result = match_across_seasons(empty, empty)
+
+    assert result.matched == 0
+    assert result.coverage == 0.0
+
+
+def test_the_summary_reads_as_a_sentence():
+    assert "matched" in match_across_seasons(SEASON_A, SEASON_B).summary()

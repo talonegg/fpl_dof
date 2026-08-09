@@ -15,14 +15,20 @@ move it to `fpl/` and write a test for it.
 ## Layout
 
 ```
-streamlit_app.py        Entry point. Must stay at the repo root -- Streamlit puts
-                        the entry script's directory on sys.path, which is what
-                        makes `import fpl` work on Streamlit Cloud with no install.
-app/                    Streamlit UI only. Pages, widgets, layout, caching wrappers.
+streamlit_app.py        Entry point. Composes only -- it does not decide. Must stay
+                        at the repo root: Streamlit puts the entry script's
+                        directory on sys.path, which is what makes `import fpl`
+                        work on Streamlit Cloud with no install.
+app/                    Streamlit UI only. Tabs are registered in app/registry.py;
+                        each declares which filters it honours.
 fpl/
-  sources/              Fetching raw data (FPL API, historical archives, odds, etc.)
-  domain/               Types + pure transforms (players, fixtures, gameweeks)
-  features/             Feature engineering (form, fixture difficulty, minutes risk)
+  sources/              Fetching raw data. Must not import domain -- a fetcher
+                        returns bytes, it does not know what a player is.
+  domain/               Types + pure transforms (players, fixtures, positions,
+                        rules, identity). Must not import models.
+  store/                Persisting domain objects (snapshots, parquet cache).
+  features/             Derived metrics. Every derivation is a frame -> frame
+                        function registered in features/registry.py.
   models/               Expected-points predictors. Each implements the Predictor protocol.
   optimise/             MILP squad/transfer optimisation (PuLP + CBC)
   backtest/             Historical replay harness + evaluation metrics
@@ -108,9 +114,49 @@ by the horizon and so churns on noise. See `docs/optimiser-results.md`. Before
 wiring transfer recommendations into the UI, run the season simulation with the
 predictor you intend to use — the answer is not the same for all of them.
 
+**The layering is tested, not just described.** `tests/test_architecture.py`
+reads the imports and fails on any upward dependency. Seven layers: sources,
+domain, store, features, models, optimise, backtest. Two violations existed
+before it was written -- position vocabulary living in `models/`, and
+`snapshot.py` fetching *and* writing from inside `sources/` -- so the test is
+load-bearing rather than decorative.
+
+**Add a derivation to the catalogue, not to a call site.** `features/registry.py`
+declares what each derivation requires and provides. `enrich()` applies the
+applicable ones and reports what it skipped, which is how live-only signals
+(availability, set-piece duty) correctly produce fewer columns on historical
+data instead of raising or inventing values.
+
 **FPL rules live in one place** — `fpl/domain/rules.py`. Budget 100.0, 15-player
 squad (2 GK / 5 DEF / 5 MID / 3 FWD), max 3 per club, valid starting XI formations,
 transfer cost 4 points per extra transfer. Do not hardcode these anywhere else.
+
+## Data model
+
+`docs/data-model.md` holds the entity model and the grain of every dataset;
+`docs/data-sources.md` maps each of its 91 elements to the source field or the
+function behind it. The mapping lives in `fpl/domain/lineage.py` and is
+enforced by `tests/test_lineage.py`, which fetches the real feeds and fails if
+the model claims a field nobody publishes. Regenerate the document with
+`python scripts/data_sources.py` rather than editing it.
+
+Adding a field to the model means adding it to `lineage.py` too, or the test
+fails. That is deliberate: a model listing a column that will always be empty
+is worse than one that omits it.
+
+## Refresh and orchestration
+
+`docs/refresh-schedule.md` documents when each dataset refreshes and why. The
+policy lives in `fpl/store/refresh.py`, and `tests/store/test_refresh.py`
+checks it against the actual cron lines and cache TTLs — so the schedule cannot
+drift from the document describing it.
+
+Two scheduled runs, both `.github/workflows/snapshot.yml`. **06:00 UTC** writes
+the append-only daily file; **11:30 UTC** refreshes only the gameweek snapshot,
+because the earliest deadline is 12:30 UTC and a 06:00 capture is 6.5 hours
+stale by then. Never make the second run overwrite the daily file: that would
+replace the morning's injury news with the afternoon's and destroy the
+point-in-time property.
 
 ## Data conventions
 
@@ -158,6 +204,13 @@ The app is used on laptop, tablet, and phone. Assume a 375px-wide viewport works
 Data tables get a curated narrow column set on small screens. Prefer `st.tabs`
 and vertical stacking over wide multi-column layouts. Test any new page at phone
 width before considering it done.
+
+### Adding a tab
+
+One entry in `app/registry.py` and one render function taking a `ViewContext`.
+Do not edit `streamlit_app.py`. The view declares which filters it honours and
+is handed an already-filtered frame, so the contract below is structural rather
+than something to remember.
 
 ### Filters
 

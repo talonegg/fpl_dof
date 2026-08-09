@@ -103,3 +103,27 @@ def test_points_per_gameweek_tolerates_missing_columns():
     df = points_per_gameweek(pd.DataFrame([{"gameweek": 1, "total_points": 5}]))
 
     assert list(df.columns) == ["gameweek", "total_points"]
+
+
+def test_exact_duplicate_appearances_are_removed():
+    """The archive records some appearances twice; summing them doubles points."""
+    doubled = pd.concat([RAW, RAW.head(1)])
+
+    result = fetch_season_gameweeks("2025-26", reader=lambda url: doubled.assign(fixture=[1, 2, 1]))
+
+    assert len(result) == 2
+
+
+def test_a_genuine_double_gameweek_survives_deduplication():
+    """Two matches in one gameweek share an element but differ by fixture."""
+    double = pd.DataFrame(
+        [
+            {"name": "P", "GW": 5, "element": 1, "fixture": 10, "total_points": 6, "value": 50},
+            {"name": "P", "GW": 5, "element": 1, "fixture": 11, "total_points": 3, "value": 50},
+        ]
+    )
+
+    result = fetch_season_gameweeks("2025-26", reader=lambda url: double)
+
+    assert len(result) == 2
+    assert result["total_points"].sum() == 9
