@@ -19,6 +19,7 @@ import streamlit as st
 
 from app.theme import MAX_COMPARISON_SERIES, series_colours
 from fpl.domain.history import collapse_to_gameweeks
+from fpl.features.availability import add_return_dates, flagged
 from fpl.features.filters import restrict_to_available
 from fpl.features.rates import LOW_MINUTES_THRESHOLD
 
@@ -62,6 +63,53 @@ def _history_for(history: pd.DataFrame, element: int) -> pd.DataFrame:
         return player
 
     return collapse_to_gameweeks(player, ["gameweek"]).sort_values("gameweek")
+
+
+def render_availability(players: pd.DataFrame) -> None:
+    """Who is carrying an injury, suspension or doubt, and until when.
+
+    Deliberately ignores the sidebar's availability filter: this is the
+    reference table you consult *because* the filter has hidden someone, so
+    filtering it by the same control would empty it exactly when it is wanted.
+    Club, position and price still apply.
+
+    Sorted by return date with the unknowns last, because "out until Saturday"
+    and "nobody knows" are different problems and only one of them is worth
+    waiting on.
+    """
+    st.subheader("Availability")
+
+    concerns = flagged(players)
+    if concerns.empty:
+        st.caption("No availability concerns among the filtered players.")
+        return
+
+    concerns = add_return_dates(concerns)
+    unknown = concerns["return_date"].isna()
+
+    display = concerns.assign(
+        Fit=(concerns["availability"] * 100).round().astype(int).astype(str) + "%",
+        # "—" covers both "no date published" and "not coming back"; the reason
+        # is what tells those apart, which is why it earns a column of its own.
+        Back=concerns["return_date"].dt.strftime("%d %b").fillna("—"),
+        Why=concerns["reason"],
+    )
+    # Known dates first and soonest first; the unknowns are a separate problem
+    # and belong at the end rather than sorted arbitrarily among them.
+    display = display.assign(_unknown=unknown).sort_values(["_unknown", "return_date", "web_name"])
+
+    columns = {"web_name": "Player", "team_name": "Team", "news": "News"}
+    available = [column for column in columns if column in display.columns]
+
+    st.caption(
+        f"{len(concerns)} player(s) with news, of whom {int(unknown.sum())} have no "
+        "published return date. Not narrowed by the availability filter."
+    )
+    st.dataframe(
+        display[[*available, "Fit", "Back", "Why"]].rename(columns=columns),
+        width="stretch",
+        hide_index=True,
+    )
 
 
 def _summary_metrics(player: pd.Series) -> None:
@@ -197,6 +245,17 @@ def render_comparison(players: pd.DataFrame, history: pd.DataFrame, season_label
     combined["cumulative"] = combined.groupby("player")["total_points"].cumsum()
     wide = combined.pivot(index="gameweek", columns="player", values="cumulative")
     wide = wide.ffill()
+
+    # Hold column order to the order players were selected. `pivot` sorts
+    # alphabetically, and colours are assigned by position, so removing one
+    # player would otherwise recolour the others -- the exact repaint the
+    # fixed-slot palette exists to prevent.
+    ordered = [
+        labels[element].split(" (")[0]
+        for element in selected
+        if labels[element].split(" (")[0] in wide.columns
+    ]
+    wide = wide[ordered]
 
     st.markdown(f"**Cumulative points — {season_label}**")
     st.line_chart(wide, color=series_colours(len(wide.columns)), height=320)

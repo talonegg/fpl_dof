@@ -14,6 +14,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from fpl.features.availability import AVAILABILITY_BANDS
 from fpl.features.filters import PlayerFilter, apply_filter, options, price_bounds
 
 PRICE_STEP = 0.1
@@ -40,11 +41,28 @@ def render(players: pd.DataFrame) -> PlayerFilter:
         help="Applies to every tab, including Fixtures.",
     )
 
+    # Defaults to everything, like every other filter here. Defaulting to fit
+    # players only is tempting -- it is the common case -- but a filter that
+    # hides rows before the user has touched anything makes a missing player
+    # look like missing data.
+    selected_bands = st.sidebar.multiselect(
+        "Availability",
+        options=list(AVAILABILITY_BANDS),
+        default=list(AVAILABILITY_BANDS),
+        key="filter_availability",
+        help="Applies to the Players and Scouting tabs. Fixtures are unaffected — "
+        "a fixture has no injuries.",
+    )
+
     # Price bounds come from what the other filters leave behind, so the slider
     # never spans a range with nothing in it.
     narrowed = apply_filter(
         players,
-        PlayerFilter(positions=tuple(selected_positions), teams=tuple(selected_teams)),
+        PlayerFilter(
+            positions=tuple(selected_positions),
+            teams=tuple(selected_teams),
+            availability_bands=tuple(selected_bands),
+        ),
     )
     bounds = price_bounds(narrowed)
 
@@ -63,6 +81,7 @@ def render(players: pd.DataFrame) -> PlayerFilter:
         positions=tuple(selected_positions),
         teams=tuple(selected_teams),
         price_range=tuple(price_range) if price_range else None,
+        availability_bands=tuple(selected_bands),
     )
 
 

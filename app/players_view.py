@@ -8,6 +8,9 @@ import streamlit as st
 MANDATORY_COLUMNS = ["web_name", "team_name", "position", "price"]
 
 OPTIONAL_COLUMNS = [
+    "availability",
+    "set_piece_duties",
+    "finishing_delta",
     "total_points",
     "form",
     "points_per_game",
@@ -39,6 +42,9 @@ COLUMN_LABELS = {
     "ict_index": "ICT",
     "goals_scored": "Goals",
     "clean_sheets": "CS",
+    "availability": "Fit%",
+    "set_piece_duties": "Set pieces",
+    "finishing_delta": "G−xG",
 }
 
 

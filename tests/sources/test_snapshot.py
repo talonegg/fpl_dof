@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 
 from fpl.sources.snapshot import (
     available_gameweeks,
+    captured_dates,
+    read_daily_signals,
     read_snapshot,
     snapshot_directory,
+    write_daily_signals,
     write_snapshot,
 )
 
@@ -91,3 +94,81 @@ def test_available_gameweeks_ignores_unrelated_directories(tmp_path, bootstrap, 
     (tmp_path / "gwXX").mkdir()
 
     assert available_gameweeks(tmp_path) == [1]
+
+
+# --- Daily capture: the only record live-only signals will ever have ---
+
+
+def test_a_daily_capture_is_written(tmp_path, bootstrap):
+    path = write_daily_signals(bootstrap, root=tmp_path, captured_on=date(2026, 8, 9))
+
+    assert path is not None
+    assert path.exists()
+    assert path.name == "2026-08-09.parquet"
+
+
+def test_the_capture_keeps_the_live_only_signals(tmp_path, bootstrap):
+    write_daily_signals(bootstrap, root=tmp_path, captured_on=date(2026, 8, 9))
+
+    daily = read_daily_signals(tmp_path)
+
+    for column in ("status", "chance_of_playing_next_round", "penalties_order", "now_cost"):
+        assert column in daily.columns
+
+
+def test_the_capture_is_stamped_with_its_date(tmp_path, bootstrap):
+    write_daily_signals(bootstrap, root=tmp_path, captured_on=date(2026, 8, 9))
+
+    daily = read_daily_signals(tmp_path)
+
+    assert set(daily["captured_on"]) == {"2026-08-09"}
+
+
+def test_a_second_run_on_the_same_day_does_not_overwrite(tmp_path, bootstrap):
+    """A re-run would replace the morning's injury news with the evening's."""
+    write_daily_signals(bootstrap, root=tmp_path, captured_on=date(2026, 8, 9))
+
+    again = write_daily_signals(bootstrap, root=tmp_path, captured_on=date(2026, 8, 9))
+
+    assert again is None
+
+
+def test_overwriting_is_possible_but_must_be_asked_for(tmp_path, bootstrap):
+    write_daily_signals(bootstrap, root=tmp_path, captured_on=date(2026, 8, 9))
+
+    again = write_daily_signals(
+        bootstrap, root=tmp_path, captured_on=date(2026, 8, 9), overwrite=True
+    )
+
+    assert again is not None
+
+
+def test_captures_accumulate_across_days(tmp_path, bootstrap):
+    for day in (7, 8, 9):
+        write_daily_signals(bootstrap, root=tmp_path, captured_on=date(2026, 8, day))
+
+    assert captured_dates(tmp_path) == ["2026-08-07", "2026-08-08", "2026-08-09"]
+    assert len(read_daily_signals(tmp_path)) == 3 * len(bootstrap["elements"])
+
+
+def test_reading_before_anything_is_captured_is_empty(tmp_path):
+    assert read_daily_signals(tmp_path).empty
+    assert captured_dates(tmp_path) == []
+
+
+def test_the_daily_capture_is_far_smaller_than_the_full_table(tmp_path, bootstrap):
+    """The reason for a curated column list: 109 columns, most of them static."""
+    from fpl.domain.players import build_players_frame
+
+    daily = write_daily_signals(bootstrap, root=tmp_path, captured_on=date(2026, 8, 9))
+    full = tmp_path / "full.parquet"
+    build_players_frame(bootstrap).to_parquet(full, index=False)
+
+    assert daily.stat().st_size < full.stat().st_size
+
+
+def test_the_daily_capture_carries_the_stable_cross_season_code(tmp_path, bootstrap):
+    """`element` is reassigned each season; `code` is what joins across them."""
+    write_daily_signals(bootstrap, root=tmp_path, captured_on=date(2026, 8, 9))
+
+    assert "code" in read_daily_signals(tmp_path).columns

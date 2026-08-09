@@ -43,6 +43,12 @@ jobs:
       - name: Capture the snapshot
         run: python scripts/snapshot.py --root snapshots
 
+      - name: Report what is held
+        working-directory: snapshots
+        run: |
+          echo "daily captures: $(ls daily 2>/dev/null | wc -l)"
+          du -sh . 2>/dev/null || true
+
       - name: Commit if anything changed
         working-directory: snapshots
         run: |

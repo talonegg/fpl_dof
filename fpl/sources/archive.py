@@ -30,8 +30,20 @@ COLUMN_RENAMES = {
 CsvReader = Callable[[str], pd.DataFrame]
 
 
+# The older season files are not UTF-8 -- accented player names are latin-1.
+# Trying UTF-8 first keeps the modern seasons exact and only falls back where
+# it is actually needed.
+ENCODINGS = ("utf-8", "latin-1")
+
+
 def _read_csv(url: str) -> pd.DataFrame:
-    return pd.read_csv(url)
+    last_error: UnicodeDecodeError | None = None
+    for encoding in ENCODINGS:
+        try:
+            return pd.read_csv(url, encoding=encoding)
+        except UnicodeDecodeError as error:
+            last_error = error
+    raise last_error  # pragma: no cover - both encodings failing is not expected
 
 
 def season_gameweeks_url(season: str) -> str:

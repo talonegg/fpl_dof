@@ -52,6 +52,27 @@ DEFENSIVE_CONTRIBUTION_THRESHOLD = {"DEF": 10, "MID": 12, "FWD": 12}
 
 FULL_APPEARANCE_MINUTES = 60
 
+# The archive is not consistent about how it spells positions -- goalkeepers
+# appear as both "GK" and "GKP", and fpl/domain/identity.py already knows this.
+# An unrecognised spelling does not fail loudly here, it silently zeroes the
+# clean-sheet term *and* the conceded penalty, so canonicalise before scoring.
+POSITION_ALIASES = {
+    "GKP": "GK",
+    "GOALKEEPER": "GK",
+    "DEFENDER": "DEF",
+    "MIDFIELDER": "MID",
+    "FORWARD": "FWD",
+}
+
+
+def canonical_position(position: object) -> object:
+    """Map a position spelling onto the one the scoring tables use."""
+    if not isinstance(position, str):
+        return position
+    upper = position.upper()
+    return POSITION_ALIASES.get(upper, upper)
+
+
 # Opponent adjustment is noisy off a handful of matches, so cap how far it can
 # swing a clean-sheet probability.
 MAX_OPPONENT_ADJUSTMENT = 0.5
@@ -85,9 +106,14 @@ class ComponentPredictor:
 
     def _player_rates(self, history: pd.DataFrame) -> pd.DataFrame:
         """Per-90 rates for every scoring component, per player."""
+        history = history.assign(
+            _full_appearance=(history["minutes"] >= FULL_APPEARANCE_MINUTES).astype(int),
+            position=history["position"].map(canonical_position),
+        )
         aggregations = {
             "minutes": ("minutes", "sum"),
             "appearances": ("minutes", "size"),
+            "full_appearances": ("_full_appearance", "sum"),
             "position": ("position", "last"),
         }
         for column in (
@@ -125,11 +151,17 @@ class ComponentPredictor:
                 _rate_per_90(totals[source], totals["minutes"]) if source in totals.columns else 0.0
             )
 
-        rates["clean_sheet_rate"] = (
-            totals["clean_sheets"] / totals["appearances"]
-            if "clean_sheets" in totals.columns
-            else 0.0
-        )
+        # Conditioned on the matches the player actually completed, because the
+        # archive only credits a clean sheet to someone who played 60 minutes.
+        # Dividing by every appearance and then multiplying by the full-
+        # appearance rate downstream would apply that 60-minute test twice and
+        # halve the term for anyone rotated.
+        if "clean_sheets" in totals.columns and "full_appearances" in totals.columns:
+            rates["clean_sheet_rate"] = (
+                totals["clean_sheets"] / totals["full_appearances"].replace(0, np.nan)
+            ).fillna(0.0)
+        else:
+            rates["clean_sheet_rate"] = 0.0
         return rates
 
     def _expected_minutes(self, history: pd.DataFrame) -> pd.DataFrame:
@@ -157,7 +189,8 @@ class ComponentPredictor:
         if "defensive_contribution" not in history.columns:
             return pd.Series(dtype="float64")
 
-        thresholds = history["position"].map(DEFENSIVE_CONTRIBUTION_THRESHOLD)
+        positions = history["position"].map(canonical_position)
+        thresholds = positions.map(DEFENSIVE_CONTRIBUTION_THRESHOLD)
         # Goalkeepers are not eligible; an unmapped position yields NaN, which
         # compares False and so contributes nothing.
         cleared = history["defensive_contribution"] >= thresholds
@@ -230,7 +263,14 @@ class ComponentPredictor:
             clean_sheet_probability * combined["full_appearance_rate"] * clean_sheet_points
         )
         saves = combined["saves_rate"] * share_of_match / SAVES_PER_POINT
-        contributions = combined["contribution_rate"] * DEFENSIVE_CONTRIBUTION_POINTS
+        # Scaled by expected minutes like every other component. Left unscaled,
+        # a defender dropped to the bench kept his historical contribution rate
+        # and so kept most of his predicted points -- inflating exactly the
+        # players a minutes-aware model exists to demote, on the newest and
+        # most heavily weighted scoring rule.
+        contributions = (
+            combined["contribution_rate"] * share_of_match * DEFENSIVE_CONTRIBUTION_POINTS
+        )
         bonus = combined["bonus_rate"] * share_of_match
         cards = (
             combined["yellow_rate"] * YELLOW_CARD_POINTS + combined["red_rate"] * RED_CARD_POINTS

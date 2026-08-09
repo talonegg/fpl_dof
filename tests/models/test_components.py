@@ -233,3 +233,53 @@ def test_one_row_per_player():
 def test_the_model_name_records_its_configuration():
     assert ComponentPredictor(4).name == "Component(4)"
     assert ComponentPredictor(4, use_expected_goals=False).name == "Component(4, actuals)"
+
+
+# --- Regressions from the second review pass ---
+
+
+def test_the_sixty_minute_test_is_not_applied_twice():
+    """`clean_sheets` already means "played 60+ and kept one"."""
+    # Started 2 of 4 matches, kept a clean sheet in both starts.
+    history = pd.concat(
+        [
+            make_history("DEF", gameweeks=2, minutes=90, clean_sheets=1),
+            make_history("DEF", gameweeks=2, minutes=20, clean_sheets=0).assign(gameweek=[3, 4]),
+        ]
+    )
+
+    points = predict_one(history)
+
+    # Clean sheet in every start, starting half the time: 4 x 0.5 = 2.0 for the
+    # clean-sheet term. Halving it again would give 1.0.
+    appearance = 0.5 * 2 + 0.5 * 1
+    assert points == pytest.approx(appearance + 2.0, abs=0.01)
+
+
+@pytest.mark.parametrize("spelling", ["GK", "GKP", "Goalkeeper"])
+def test_goalkeepers_score_the_same_however_the_position_is_spelled(spelling):
+    """The archive uses both GK and GKP; an unknown spelling scored zero."""
+    history = make_history(spelling, clean_sheets=1, saves=3)
+
+    # 2 appearance + 4 clean sheet + 1 saves
+    assert predict_one(history) == pytest.approx(7.0)
+
+
+def test_an_unrecognised_position_does_not_silently_drop_the_conceded_penalty():
+    defender = make_history("DEF", goals_conceded=2)
+    spelled_out = make_history("Defender", goals_conceded=2)
+
+    assert predict_one(defender) == pytest.approx(predict_one(spelled_out))
+
+
+def test_defensive_contributions_are_scaled_by_expected_minutes():
+    """A benched defender kept his contribution points without playing."""
+    starter = make_history("DEF", minutes=90, defensive_contribution=12)
+    benched = make_history("DEF", minutes=5, defensive_contribution=12)
+
+    starter_points = predict_one(starter)
+    benched_points = predict_one(benched)
+
+    assert starter_points > benched_points
+    # The bench player should keep only a small fraction of the DC points.
+    assert benched_points < 1.5

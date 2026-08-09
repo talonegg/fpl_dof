@@ -126,6 +126,80 @@ def _per_gameweek(
     return per_gameweek[metric]
 
 
+def compare_across_seasons(
+    per_gameweek: pd.DataFrame,
+    model: str,
+    benchmark: str,
+    metric: str = DEFAULT_METRIC,
+) -> Comparison:
+    """Compare two models over pooled per-(season, gameweek) metrics.
+
+    Takes the output of :func:`fpl.backtest.seasons.compare_many` rather than
+    replaying, so several seasons cost one pass. Pairing is on
+    ``(season, gameweek)``: comparing a 2022-23 gameweek against a 2025-26 one
+    would reintroduce exactly the shared variance that pairing removes.
+    """
+    if per_gameweek.empty or metric not in per_gameweek.columns:
+        return Comparison(model, benchmark, metric, 0, 0, float("nan"), float("nan"))
+
+    keys = ["season", "gameweek"]
+    left = per_gameweek[per_gameweek["model"] == model].set_index(keys)[metric]
+    right = per_gameweek[per_gameweek["model"] == benchmark].set_index(keys)[metric]
+
+    paired = pd.concat(
+        [left.rename("model"), right.rename("benchmark")], axis=1, join="inner"
+    ).dropna()
+    if paired.empty:
+        return Comparison(model, benchmark, metric, 0, 0, float("nan"), float("nan"))
+
+    difference = paired["model"] - paired["benchmark"]
+    standard_error = difference.std() / (len(difference) ** 0.5)
+
+    if standard_error:
+        t_statistic = difference.mean() / standard_error
+    elif difference.mean() == 0:
+        t_statistic = 0.0
+    else:
+        t_statistic = float("inf") * (1 if difference.mean() > 0 else -1)
+
+    return Comparison(
+        model=model,
+        benchmark=benchmark,
+        metric=metric,
+        gameweeks=len(difference),
+        wins=int((difference > 0).sum()),
+        mean_difference=float(difference.mean()),
+        t_statistic=float(t_statistic),
+    )
+
+
+def season_comparison_table(
+    per_gameweek: pd.DataFrame, benchmark: str, metric: str = DEFAULT_METRIC
+) -> pd.DataFrame:
+    """Every model against the benchmark, pooled across seasons."""
+    if per_gameweek.empty:
+        return pd.DataFrame()
+
+    rows = []
+    for model in per_gameweek["model"].unique():
+        if model == benchmark:
+            continue
+        comparison = compare_across_seasons(per_gameweek, model, benchmark, metric)
+        rows.append(
+            {
+                "model": comparison.model,
+                "wins": f"{comparison.wins}/{comparison.gameweeks}",
+                "mean_difference": comparison.mean_difference,
+                "t_statistic": comparison.t_statistic,
+                "verdict": comparison.verdict,
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).sort_values("mean_difference", ascending=False).set_index("model")
+
+
 def comparison_table(
     season: pd.DataFrame,
     predictors: list[Predictor],

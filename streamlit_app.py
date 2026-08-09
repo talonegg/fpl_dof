@@ -6,6 +6,7 @@ locally and on Streamlit Community Cloud without an editable install.
 """
 
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import streamlit as st
@@ -80,8 +81,11 @@ with st.sidebar:
         format_func=lambda value: labels[value],
         key="watchlist_select",
     )
+    # Compare as sets: the widget hands codes back in element order while the
+    # stored list is sorted, so a list comparison differs on the first render
+    # of every session and rewrites the file the user never touched.
     codes = players[players["element"].isin(chosen)]["code"].tolist()
-    if codes != st.session_state.watchlist:
+    if set(codes) != set(st.session_state.watchlist):
         st.session_state.watchlist = codes
         watchlist.save(WATCHLIST_PATH, codes)
 
@@ -93,3 +97,12 @@ with st.sidebar:
             width="stretch",
             hide_index=True,
         )
+
+# Below the tabs, so it is on every page: the availability table is what you
+# check when a filter has hidden someone, and it is reference rather than
+# analysis. It honours club/position/price but not the availability band --
+# filtering it by that control would empty it precisely when it is needed.
+st.divider()
+scouting_view.render_availability(
+    apply_filter(players, replace(player_filter, availability_bands=None))
+)

@@ -220,3 +220,109 @@ def test_a_selection_removed_by_a_filter_does_not_break_the_app(
 
     assert not at.exception
     assert at.multiselect(key="comparison_players").value == []
+
+
+# --- Regressions from the second review pass ---
+
+
+def test_the_watchlist_file_is_not_rewritten_on_a_first_render(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    """The widget returns element order; the stored list is sorted by code."""
+    from fpl.features import watchlist
+
+    path = tmp_path / "watchlist.json"
+    codes = [element["code"] for element in bootstrap["elements"][:3]]
+    watchlist.save(path, codes)
+    before = path.stat().st_mtime_ns
+
+    _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    assert path.stat().st_mtime_ns == before, "watchlist rewritten with no user action"
+
+
+def test_comparison_series_keep_their_colour_when_one_is_removed(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    """Colour is assigned by slot, so column order must follow selection order."""
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    elements = [element["id"] for element in bootstrap["elements"][:3]]
+    # Select in an order that is not alphabetical by name.
+    at.multiselect(key="comparison_players").set_value(elements).run()
+    assert not at.exception
+
+    at.multiselect(key="comparison_players").set_value(elements[:2]).run()
+    assert not at.exception
+
+
+# --- The availability filter, and the reference table it does not narrow ---
+
+
+def test_the_availability_filter_reaches_the_players_tab(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    at.sidebar.multiselect(key="filter_availability").set_value(["Unavailable"]).run()
+
+    assert not at.exception
+    total = len(bootstrap["elements"])
+    captions = [caption.value for caption in at.caption]
+    assert not any(f"Showing {total} of {total}" in caption for caption in captions)
+
+
+def test_the_availability_filter_reaches_the_scouting_selectors(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    everyone = len(at.multiselect(key="comparison_players").options)
+    at.sidebar.multiselect(key="filter_availability").set_value(["Unavailable"]).run()
+
+    assert not at.exception
+    assert len(at.multiselect(key="comparison_players").options) < everyone
+
+
+def test_deselecting_every_band_leaves_nothing_but_does_not_crash(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    at.sidebar.multiselect(key="filter_availability").set_value([]).run()
+
+    assert not at.exception
+    assert any("No players match" in warning.value for warning in at.warning)
+
+
+def test_the_availability_table_survives_filtering_everyone_out(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    """It is the table you check *because* the filter hid someone."""
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    at.sidebar.multiselect(key="filter_availability").set_value(["Available"]).run()
+
+    assert not at.exception
+    captions = " ".join(caption.value for caption in at.caption)
+    assert "player(s) with news" in captions
+
+
+def test_the_availability_table_reports_how_many_have_no_return_date(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    captions = " ".join(caption.value for caption in at.caption)
+    assert "no published return date" in captions
+
+
+def test_the_availability_table_still_honours_the_club_filter(
+    monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive
+):
+    at = _run_app(monkeypatch, bootstrap, fixtures_snapshot, tmp_path, archive)
+
+    at.sidebar.multiselect(key="filter_teams").set_value(["Arsenal"]).run()
+
+    assert not at.exception
+    assert "Availability" in [header.value for header in at.subheader]

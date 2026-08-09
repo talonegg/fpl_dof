@@ -4,5 +4,8 @@ pandas==3.0.5
 # Streamlit happens to pull pyarrow in too, but fpl/sources/cache.py uses it
 # directly for the parquet cache, so it is declared here in its own right.
 pyarrow==24.0.0
+# Squad optimisation is an integer program; PuLP ships a CBC solver, so there
+# is no separate system dependency to install.
+pulp==3.3.2
 requests==2.34.2
 streamlit==1.61.1
