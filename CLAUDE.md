@@ -131,6 +131,19 @@ data instead of raising or inventing values.
 squad (2 GK / 5 DEF / 5 MID / 3 FWD), max 3 per club, valid starting XI formations,
 transfer cost 4 points per extra transfer. Do not hardcode these anywhere else.
 
+## Data model
+
+`docs/data-model.md` holds the entity model and the grain of every dataset;
+`docs/data-sources.md` maps each of its 91 elements to the source field or the
+function behind it. The mapping lives in `fpl/domain/lineage.py` and is
+enforced by `tests/test_lineage.py`, which fetches the real feeds and fails if
+the model claims a field nobody publishes. Regenerate the document with
+`python scripts/data_sources.py` rather than editing it.
+
+Adding a field to the model means adding it to `lineage.py` too, or the test
+fails. That is deliberate: a model listing a column that will always be empty
+is worse than one that omits it.
+
 ## Data conventions
 
 - Prices from the API are integer tenths (`now_cost: 55` → £5.5m). Convert once,

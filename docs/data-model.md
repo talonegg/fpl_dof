@@ -4,6 +4,11 @@ Every dataset this project touches, what its grain and keys really are, and how
 it should be persisted. Written after Phase 5, when the number of sources had
 grown past the point where "a DataFrame from somewhere" was a workable answer.
 
+**Companion document:** `docs/data-sources.md` maps every one of the 91
+elements below to the source field it comes from, or the function that derives
+it. It is generated from `fpl/domain/lineage.py` and checked against the live
+feeds, so "can we actually get this?" has a tested answer for every field.
+
 ## The two facts that drive everything
 
 **1. Half the data is live-only and disappears.** Injury status, set-piece
