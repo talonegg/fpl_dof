@@ -149,7 +149,10 @@ machinery already in `features/market.py`.
 
 ### 3.6 Defensive contributions
 
-Constrained by data, as noted. From the single season available:
+Constrained by data, as noted. **External sources were investigated and none is
+usable** — see §9. A partial workaround exists: a BPS-residual proxy that
+recovers a weak signal for pre-2025-26 seasons. From the single season of real
+data:
 
 ```
 P(clears threshold) = f( CBIT90 or CBIRT90 , expected minutes )
